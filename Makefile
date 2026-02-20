@@ -1,4 +1,4 @@
-.PHONY: dev dev-backend dev-frontend build-frontend build-arm64 build-local clean deploy
+.PHONY: dev dev-backend dev-frontend build-frontend build-arm64 build-mipsel build-all build-local clean deploy-disk deploy-ssh
 
 # === Разработка ===
 
@@ -19,14 +19,21 @@ build-frontend:
 build-arm64: build-frontend
 	GOOS=linux GOARCH=arm64 go build \
 		-ldflags="-s -w" \
-		-o build/xkeen-panel \
+		-o build/xkeen-panel-aarch64 \
 		.
+
+build-mipsel: build-frontend
+	GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build \
+		-ldflags="-s -w" \
+		-o build/xkeen-panel-mipsel \
+		.
+
+build-all: build-frontend
+	GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o build/xkeen-panel-aarch64 .
+	GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -ldflags="-s -w" -o build/xkeen-panel-mipsel .
 
 build-local: build-frontend
 	go build -o build/xkeen-panel .
-
-compress: build-arm64
-	upx --best build/xkeen-panel
 
 # === Деплой ===
 
@@ -35,12 +42,12 @@ ROUTER_DISK ?= /Volumes/2bdb2bac-02b0-480a-9d7d-3affdea7b5ee
 
 deploy-disk: build-arm64
 	mkdir -p $(ROUTER_DISK)/etc/xkeen-panel/data
-	cp build/xkeen-panel $(ROUTER_DISK)/sbin/xkeen-panel
+	cp build/xkeen-panel-aarch64 $(ROUTER_DISK)/sbin/xkeen-panel
 	@test -f $(ROUTER_DISK)/etc/xkeen-panel/config.yaml || cp config.yaml $(ROUTER_DISK)/etc/xkeen-panel/config.yaml
 	@echo "Deployed to router disk"
 
 deploy-ssh: build-arm64
-	scp build/xkeen-panel root@192.168.1.1:/opt/sbin/xkeen-panel
+	scp build/xkeen-panel-aarch64 root@192.168.1.1:/opt/sbin/xkeen-panel
 	scp config.yaml root@192.168.1.1:/opt/etc/xkeen-panel/config.yaml
 
 clean:
