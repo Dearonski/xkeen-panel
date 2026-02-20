@@ -84,10 +84,14 @@ else
     echo "Конфиг уже существует, пропущен"
 fi
 
+# Создать директорию для логов
+mkdir -p /opt/var/log
+
 # Init-скрипт
 cat > "$INIT_SCRIPT" << 'INITSCRIPT'
 #!/bin/sh
 
+ENABLED=yes
 PROCS="xkeen-panel"
 ARGS="-config /opt/etc/xkeen-panel/config.yaml"
 DESC="XKeen Panel"

@@ -1,56 +1,56 @@
 # XKeen Panel
 
-Веб-панель для управления [XKeen](https://github.com/Jenya-XKeen/XKeen)/Xray на роутерах Keenetic.
+Web panel for managing [XKeen](https://github.com/Jenya-XKeen/XKeen)/Xray on Keenetic routers.
 
 ![dashboard](https://img.shields.io/badge/stack-Go%20%2B%20React-blue)
 
-## Возможности
+## Features
 
-- **Управление подписками** — добавление URL, обновление списка серверов
-- **Выбор сервера** — переключение активного сервера с автоматическим рестартом Xray
-- **Проверка латенси** — стриминг пинга каждого сервера в реальном времени (SSE)
-- **Watchdog** — автоматическая проверка соединения и переключение на следующий сервер при сбоях
-- **Логи в реальном времени** — через Server-Sent Events, без поллинга
-- **Аутентификация** — JWT + TOTP (двухфакторная)
+- **Subscription management** — add URL, refresh server list
+- **Server selection** — switch active server with automatic Xray restart
+- **Latency check** — real-time per-server ping streaming (SSE)
+- **Watchdog** — automatic connection monitoring and failover to next server
+- **Real-time logs** — via Server-Sent Events, no polling
+- **Authentication** — JWT + TOTP (two-factor)
 
-## Установка на роутер
+## Installation
 
-### Требования
+### Requirements
 
-- Keenetic с установленным [Entware](https://help.keenetic.com/hc/ru/articles/360021214160)
-- Установленный [XKeen](https://github.com/Jenya-XKeen/XKeen)
-- Пакет `curl` (`opkg install curl`)
+- Keenetic router with [Entware](https://help.keenetic.com/hc/ru/articles/360021214160)
+- [XKeen](https://github.com/Jenya-XKeen/XKeen) installed
+- `curl` package (`opkg install curl`)
 
-### Быстрая установка
+### Quick install
 
-Подключитесь к роутеру по SSH и выполните:
+Connect to your router via SSH and run:
 
 ```sh
 curl -sL https://raw.githubusercontent.com/Dearonski/xkeen-panel/main/install.sh | sh
 ```
 
-Если архитектура не определилась автоматически:
+If architecture is not detected automatically:
 
 ```sh
-# Для Keenetic Giga, Ultra, Peak и других ARM64
+# Keenetic Giga, Ultra, Peak and other ARM64 models
 curl -sL https://raw.githubusercontent.com/Dearonski/xkeen-panel/main/install.sh | sh -s aarch64
 
-# Для Keenetic с MIPS (старые модели)
+# Keenetic with MIPS (older models)
 curl -sL https://raw.githubusercontent.com/Dearonski/xkeen-panel/main/install.sh | sh -s mipsel
 ```
 
-### Ручная установка
+### Manual installation
 
 ```sh
-# 1. Скачать бинарник (выберите свою архитектуру)
+# 1. Download binary (choose your architecture)
 curl -L -o /opt/sbin/xkeen-panel \
   https://github.com/Dearonski/xkeen-panel/releases/latest/download/xkeen-panel-aarch64
 chmod +x /opt/sbin/xkeen-panel
 
-# 2. Создать директории
+# 2. Create directories
 mkdir -p /opt/etc/xkeen-panel/data
 
-# 3. Создать конфиг
+# 3. Create config
 cat > /opt/etc/xkeen-panel/config.yaml << 'EOF'
 port: 3000
 data_dir: /opt/etc/xkeen-panel/data
@@ -63,10 +63,14 @@ max_fails: 3
 log_file: /opt/var/log/xkeen-panel.log
 EOF
 
-# 4. Создать init-скрипт для автозапуска
+# 4. Create log directory
+mkdir -p /opt/var/log
+
+# 5. Create init script for autostart
 cat > /opt/etc/init.d/S99xkeen-panel << 'EOF'
 #!/bin/sh
 
+ENABLED=yes
 PROCS="xkeen-panel"
 ARGS="-config /opt/etc/xkeen-panel/config.yaml"
 DESC="XKeen Panel"
@@ -76,75 +80,79 @@ PREARGS=""
 EOF
 chmod +x /opt/etc/init.d/S99xkeen-panel
 
-# 5. Запустить
+# 6. Start
 /opt/etc/init.d/S99xkeen-panel start
 ```
 
-### После установки
+### After installation
 
-1. Откройте в браузере `http://<IP роутера>:3000`
-2. Создайте учётную запись (логин + пароль)
-3. Отсканируйте QR-код для TOTP (Google Authenticator, Aegis и т.д.)
-4. Войдите с логином, паролем и кодом из приложения
+1. Open `http://<router IP>:3000` in your browser
+2. Create an account (username + password)
+3. Scan the QR code for TOTP (Google Authenticator, Aegis, etc.)
+4. Log in with username, password and code from the app
 
-## Управление
+## Usage
 
 ```sh
-# Запуск / остановка / перезапуск
+# Start / stop / restart
 /opt/etc/init.d/S99xkeen-panel start
 /opt/etc/init.d/S99xkeen-panel stop
 /opt/etc/init.d/S99xkeen-panel restart
 
-# Логи
+# Logs
 tail -f /opt/var/log/xkeen-panel.log
 ```
 
-## Обновление
+## Updating
 
 ```sh
-# Остановить панель
+# Stop the panel
 /opt/etc/init.d/S99xkeen-panel stop
 
-# Скачать новую версию
+# Download new version
 curl -L -o /opt/sbin/xkeen-panel \
   https://github.com/Dearonski/xkeen-panel/releases/latest/download/xkeen-panel-aarch64
 chmod +x /opt/sbin/xkeen-panel
 
-# Запустить
+# Start
 /opt/etc/init.d/S99xkeen-panel start
 ```
 
-Или повторно запустить install.sh — он не перезаписывает конфиг.
+Or re-run install.sh — it won't overwrite your config.
 
-## Конфигурация
+## Configuration
 
-Файл: `/opt/etc/xkeen-panel/config.yaml`
+File: `/opt/etc/xkeen-panel/config.yaml`
 
-| Параметр | По умолчанию | Описание |
-|----------|-------------|----------|
-| `port` | `3000` | Порт веб-панели |
-| `data_dir` | `/opt/etc/xkeen-panel/data` | Директория данных |
-| `xkeen_path` | `/opt/sbin/xkeen` | Путь к бинарнику XKeen |
-| `outbounds_file` | `/opt/etc/xray/configs/04_outbounds.json` | Конфиг outbounds Xray |
-| `check_interval` | `120` | Интервал проверки watchdog (секунды) |
-| `check_url` | `https://www.google.com` | URL для проверки соединения |
-| `max_fails` | `3` | Сбоев подряд до переключения сервера |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `port` | `3000` | Web panel port |
+| `data_dir` | `/opt/etc/xkeen-panel/data` | Data directory |
+| `xkeen_path` | `/opt/sbin/xkeen` | Path to XKeen binary |
+| `outbounds_file` | `/opt/etc/xray/configs/04_outbounds.json` | Xray outbounds config |
+| `check_interval` | `120` | Watchdog check interval (seconds) |
+| `check_url` | `https://www.google.com` | URL for connection check |
+| `max_fails` | `3` | Consecutive failures before server switch |
 
-## Сборка из исходников
+## Building from source
 
 ```sh
-# Зависимости
+# Requirements
 go 1.23+
 node 20+
 
-# Собрать для ARM64 (Keenetic Giga/Ultra/Peak)
-make build-arm64
+# Build for all architectures
+make build-all
 
-# Бинарник: build/xkeen-panel
+# Or specific target
+make build-arm64   # Keenetic Giga/Ultra/Peak
+make build-mipsel  # Keenetic older models
+
+# Output: build/xkeen-panel-{aarch64,mipsel}
 ```
 
-## Стек
+## Stack
 
 - **Backend:** Go, chi router, JWT, TOTP, SSE
 - **Frontend:** React 19, Vite, Tailwind CSS 4, TanStack Query
-- Фронтенд встроен в бинарник через `go:embed`
+- Frontend is embedded into the binary via `go:embed`
