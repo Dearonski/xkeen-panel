@@ -1,0 +1,19 @@
+# Build
+build/
+
+# Data (credentials, logs)
+data/
+*.log
+
+# Dev config
+config.dev.yaml
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store

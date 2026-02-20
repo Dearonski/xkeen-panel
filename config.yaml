@@ -1,0 +1,18 @@
+# Порт веб-панели
+port: 3000
+
+# Папка для данных (user.json, subscription.json)
+data_dir: /opt/etc/xkeen-panel/data
+
+# === Пути XKeen/Xray ===
+xkeen_path: /opt/sbin/xkeen
+outbounds_file: /opt/etc/xray/configs/04_outbounds.json
+init_script: /opt/etc/init.d/S24xray
+
+# === Watchdog ===
+check_interval: 120        # Интервал проверки в секундах
+check_url: https://www.google.com
+max_fails: 3               # Фейлов подряд до переключения
+
+# Лог-файл watchdog'а
+log_file: /opt/var/log/xkeen-panel.log
