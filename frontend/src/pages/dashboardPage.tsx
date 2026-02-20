@@ -126,7 +126,14 @@ export function DashboardPage() {
             <header className='bg-card border-b sticky top-0 z-10'>
                 <div className='max-w-6xl mx-auto px-4 py-3 flex items-center justify-between'>
                     <div>
-                        <h1 className='text-lg font-bold'>XKeen Panel</h1>
+                        <h1 className='text-lg font-bold flex items-center gap-2'>
+                            <img
+                                src='/favicon.svg'
+                                alt=''
+                                className='size-6'
+                            />
+                            XKeen Panel
+                        </h1>
                         <div className='flex items-center gap-3 mt-0.5'>
                             <StatusBadge
                                 connected={s?.connected ?? false}
