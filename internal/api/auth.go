@@ -11,10 +11,11 @@ import (
 type AuthHandler struct {
 	userManager *auth.UserManager
 	rateLimiter *RateLimiter
+	cfg         *models.Config
 }
 
-func NewAuthHandler(um *auth.UserManager, rl *RateLimiter) *AuthHandler {
-	return &AuthHandler{userManager: um, rateLimiter: rl}
+func NewAuthHandler(um *auth.UserManager, rl *RateLimiter, cfg *models.Config) *AuthHandler {
+	return &AuthHandler{userManager: um, rateLimiter: rl, cfg: cfg}
 }
 
 // HandleAuthStatus — GET /api/auth/status
@@ -107,7 +108,7 @@ func (h *AuthHandler) HandleSetupConfirm(w http.ResponseWriter, r *http.Request)
 
 // HandleLogin — POST /api/auth/login
 func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
-	ip := clientIP(r)
+	ip := clientIP(r, h.cfg.TrustProxyHeaders)
 
 	var req models.LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -140,7 +141,7 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 
 // HandleLoginKey — POST /api/auth/login/key (вход по ключу доступа, без TOTP)
 func (h *AuthHandler) HandleLoginKey(w http.ResponseWriter, r *http.Request) {
-	ip := clientIP(r)
+	ip := clientIP(r, h.cfg.TrustProxyHeaders)
 
 	var req models.AccessKeyLoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -200,9 +201,15 @@ func (h *AuthHandler) HandleKeyRevoke(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
-func clientIP(r *http.Request) string {
-	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-		return strings.Split(forwarded, ",")[0]
+// clientIP возвращает идентификатор клиента для rate-limit. X-Forwarded-For
+// учитывается ТОЛЬКО при trust_proxy_headers (его легко подделать на прямом
+// сокете), и берётся правый хоп — добавленный доверенным прокси.
+func clientIP(r *http.Request, trustProxy bool) string {
+	if trustProxy {
+		if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+			parts := strings.Split(forwarded, ",")
+			return strings.TrimSpace(parts[len(parts)-1])
+		}
 	}
 	return r.RemoteAddr
 }

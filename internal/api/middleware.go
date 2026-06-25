@@ -104,15 +104,10 @@ func (rl *RateLimiter) Reset(ip string) {
 }
 
 // RateLimitMiddleware применяет rate limiting
-func RateLimitMiddleware(limiter *RateLimiter) func(http.Handler) http.Handler {
+func RateLimitMiddleware(limiter *RateLimiter, trustProxy bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := r.RemoteAddr
-			if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-				ip = strings.Split(forwarded, ",")[0]
-			}
-
-			if !limiter.Allow(strings.TrimSpace(ip)) {
+			if !limiter.Allow(clientIP(r, trustProxy)) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusTooManyRequests)
 				w.Write([]byte(`{"error":"слишком много попыток, попробуйте позже"}`))

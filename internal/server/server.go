@@ -49,7 +49,7 @@ func (s *Server) Handler() http.Handler {
 	rateLimiter := api.NewRateLimiter(5, time.Minute)
 
 	// Хендлеры
-	authHandler := api.NewAuthHandler(s.userManager, rateLimiter)
+	authHandler := api.NewAuthHandler(s.userManager, rateLimiter, s.config)
 	webAuthnHandler := api.NewWebAuthnHandler(s.userManager, rateLimiter, s.config)
 	handlers := api.NewHandlers(s.config, s.subscription, s.watchdog)
 
@@ -60,10 +60,10 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/status", authHandler.HandleAuthStatus)
 			r.Post("/setup", authHandler.HandleSetup)
 			r.Post("/setup/confirm", authHandler.HandleSetupConfirm)
-			r.With(api.RateLimitMiddleware(rateLimiter)).Post("/login", authHandler.HandleLogin)
-			r.With(api.RateLimitMiddleware(rateLimiter)).Post("/login/key", authHandler.HandleLoginKey)
-			r.With(api.RateLimitMiddleware(rateLimiter)).Post("/login/passkey/begin", webAuthnHandler.HandleLoginBegin)
-			r.With(api.RateLimitMiddleware(rateLimiter)).Post("/login/passkey/finish", webAuthnHandler.HandleLoginFinish)
+			r.With(api.RateLimitMiddleware(rateLimiter, s.config.TrustProxyHeaders)).Post("/login", authHandler.HandleLogin)
+			r.With(api.RateLimitMiddleware(rateLimiter, s.config.TrustProxyHeaders)).Post("/login/key", authHandler.HandleLoginKey)
+			r.With(api.RateLimitMiddleware(rateLimiter, s.config.TrustProxyHeaders)).Post("/login/passkey/begin", webAuthnHandler.HandleLoginBegin)
+			r.With(api.RateLimitMiddleware(rateLimiter, s.config.TrustProxyHeaders)).Post("/login/passkey/finish", webAuthnHandler.HandleLoginFinish)
 		})
 
 		// SSE-маршруты — с JWT, без таймаута
