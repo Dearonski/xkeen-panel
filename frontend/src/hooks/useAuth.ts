@@ -1,6 +1,7 @@
 import { useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getToken, setToken, clearToken, api } from '@/lib/api'
+import { getPasskeyToken } from '@/lib/webauthn'
 
 export const useAuth = () => {
     const navigate = useNavigate()
@@ -30,6 +31,12 @@ export const useAuth = () => {
         [navigate],
     )
 
+    const loginWithPasskey = useCallback(async () => {
+        const token = await getPasskeyToken()
+        setToken(token)
+        navigate('/')
+    }, [navigate])
+
     const logout = useCallback(() => {
         clearToken()
         navigate('/login')
@@ -40,6 +47,7 @@ export const useAuth = () => {
         isAuthenticated: !!getToken(),
         login,
         loginWithKey,
+        loginWithPasskey,
         logout,
     }
 }

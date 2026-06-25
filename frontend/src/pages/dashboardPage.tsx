@@ -8,6 +8,7 @@ import { SubscriptionForm } from '@/components/subscriptionForm'
 import { ServerList } from '@/components/serverList'
 import { Controls } from '@/components/controls'
 import { AccessKeyCard } from '@/components/accessKeyCard'
+import { PasskeyCard } from '@/components/passkeyCard'
 import { LogViewer } from '@/components/logViewer'
 import { Button } from '@/components/ui/button'
 import { IconLogout, IconLoader2 } from '@tabler/icons-react'
@@ -186,6 +187,7 @@ export function DashboardPage() {
                                 restarting
                             }
                         />
+                        <PasskeyCard />
                         <AccessKeyCard />
                         <LogViewer
                             logs={logs.data ?? []}

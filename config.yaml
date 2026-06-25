@@ -35,3 +35,12 @@ geoip_path: /opt/etc/xray/dat/geoip_v2fly.dat
 auto_switch_avoid_countries:    # Не переключаться автоматически на серверы этих стран
   - RU
   - BY
+
+# === Passkey (WebAuthn) ===
+# Если панель открывается за HTTPS-прокси и он прокидывает X-Forwarded-Host/Proto,
+# эти поля можно не задавать — RP ID выведется из запроса автоматически.
+# Если автодетект не срабатывает — пропиши явно свой домен:
+# webauthn_rp_id: xkeen.superwifi.netcraze.link
+# webauthn_rp_name: XKeen Panel
+# webauthn_origins:
+#   - https://xkeen.superwifi.netcraze.link
