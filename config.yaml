@@ -36,11 +36,16 @@ auto_switch_avoid_countries:    # Не переключаться автомат
   - RU
   - BY
 
+# Доверять заголовкам прокси (X-Forwarded-For/Host/Proto). Включай ТОЛЬКО если
+# панель за доверенным HTTPS-прокси, который их перезаписывает. Влияет на
+# rate-limit (иначе IP можно подделать) и на автовывод RP для passkey.
+trust_proxy_headers: false
+
 # === Passkey (WebAuthn) ===
-# Если панель открывается за HTTPS-прокси и он прокидывает X-Forwarded-Host/Proto,
-# эти поля можно не задавать — RP ID выведется из запроса автоматически.
-# Если автодетект не срабатывает — пропиши явно свой домен:
+# Для passkey нужен HTTPS-домен. Задай RP ID и origins явно (надёжнее всего):
 # webauthn_rp_id: xkeen.superwifi.netcraze.link
 # webauthn_rp_name: XKeen Panel
 # webauthn_origins:
 #   - https://xkeen.superwifi.netcraze.link
+# Либо, если домен задать нельзя — включи trust_proxy_headers: true, и RP
+# выведется из X-Forwarded-Host/Proto (только за доверенным прокси!).

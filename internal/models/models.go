@@ -34,8 +34,13 @@ type Config struct {
 	GeoIPPath                string   `yaml:"geoip_path"`
 	AutoSwitchAvoidCountries []string `yaml:"auto_switch_avoid_countries"`
 
-	// WebAuthn (passkey). Если RPID пуст — выводится из заголовков запроса
-	// (X-Forwarded-Host/Proto), что удобно за HTTPS-прокси.
+	// Доверять заголовкам прокси (X-Forwarded-For/Host/Proto). Включать ТОЛЬКО
+	// если панель за доверенным прокси, который их перезаписывает — иначе их
+	// можно подделать на прямом сокете :3000.
+	TrustProxyHeaders bool `yaml:"trust_proxy_headers"`
+
+	// WebAuthn (passkey). RPID/origins лучше задать явно. Вывод из заголовков
+	// запроса допускается только при trust_proxy_headers: true.
 	WebAuthnRPID    string   `yaml:"webauthn_rp_id"`
 	WebAuthnRPName  string   `yaml:"webauthn_rp_name"`
 	WebAuthnOrigins []string `yaml:"webauthn_origins"`

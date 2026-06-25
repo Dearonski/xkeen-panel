@@ -52,9 +52,30 @@ func TestRateLimiterWindowExpiry(t *testing.T) {
 	}
 }
 
+func TestClientIP(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "9.9.9.9:111"
+	req.Header.Set("X-Forwarded-For", "1.1.1.1, 2.2.2.2")
+
+	// Не доверяем прокси → RemoteAddr, подделанный XFF игнорируется
+	if got := clientIP(req, false); got != "9.9.9.9:111" {
+		t.Errorf("trustProxy=false: got %q, want RemoteAddr", got)
+	}
+	// Доверяем прокси → правый хоп (добавленный прокси)
+	if got := clientIP(req, true); got != "2.2.2.2" {
+		t.Errorf("trustProxy=true: got %q, want rightmost XFF", got)
+	}
+	// Доверяем, но XFF нет → RemoteAddr
+	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req2.RemoteAddr = "9.9.9.9:111"
+	if got := clientIP(req2, true); got != "9.9.9.9:111" {
+		t.Errorf("trustProxy=true без XFF: got %q", got)
+	}
+}
+
 func TestRateLimitMiddleware(t *testing.T) {
 	limiter := NewRateLimiter(1, time.Minute)
-	handler := RateLimitMiddleware(limiter)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := RateLimitMiddleware(limiter, false)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 

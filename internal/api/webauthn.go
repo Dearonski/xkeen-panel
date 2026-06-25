@@ -1,7 +1,10 @@
 package api
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -13,7 +16,14 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 )
 
-const webAuthnSessionTTL = 5 * time.Minute
+const (
+	webAuthnSessionTTL  = 5 * time.Minute
+	maxWebAuthnSessions = 64
+	registerCookie      = "xkwa_reg"
+	loginCookie         = "xkwa_login"
+	registerPath        = "/api/account/passkey"
+	loginPath           = "/api/auth/login/passkey"
+)
 
 type webAuthnSession struct {
 	data *webauthn.SessionData
@@ -38,22 +48,37 @@ func NewWebAuthnHandler(um *auth.UserManager, rl *RateLimiter, cfg *models.Confi
 	}
 }
 
-// webAuthn собирает экземпляр WebAuthn под текущий origin: из конфига, а если
-// RPID не задан — из заголовков прокси (за HTTPS-туннелем это самый надёжный путь).
+// webAuthn собирает экземпляр WebAuthn. RPID/origins берутся из конфига; вывод из
+// заголовков запроса допускается только при доверенном прокси (иначе серверный
+// origin-пин был бы подконтролен клиенту на прямом :3000 сокете).
 func (h *WebAuthnHandler) webAuthn(r *http.Request) (*webauthn.WebAuthn, error) {
 	rpID := strings.TrimSpace(h.cfg.WebAuthnRPID)
 	origins := h.cfg.WebAuthnOrigins
+	name := h.cfg.WebAuthnRPName
+	if name == "" {
+		name = "XKeen Panel"
+	}
 
 	if rpID == "" {
+		if !h.cfg.TrustProxyHeaders {
+			return nil, fmt.Errorf("passkey не настроен: задайте webauthn_rp_id и webauthn_origins (или trust_proxy_headers за доверенным прокси)")
+		}
 		host := r.Header.Get("X-Forwarded-Host")
 		if host == "" {
 			host = r.Host
 		}
+		if host == "" {
+			return nil, fmt.Errorf("не удалось определить host для passkey")
+		}
 		scheme := r.Header.Get("X-Forwarded-Proto")
 		if scheme == "" {
-			scheme = "https"
+			if r.TLS != nil {
+				scheme = "https"
+			} else {
+				scheme = "http"
+			}
 		}
-		if len(origins) == 0 && host != "" {
+		if len(origins) == 0 {
 			origins = []string{scheme + "://" + host}
 		}
 		if i := strings.IndexByte(host, ':'); i >= 0 {
@@ -62,48 +87,93 @@ func (h *WebAuthnHandler) webAuthn(r *http.Request) (*webauthn.WebAuthn, error) 
 		rpID = host
 	}
 
-	name := h.cfg.WebAuthnRPName
-	if name == "" {
-		name = "XKeen Panel"
-	}
-
 	return webauthn.New(&webauthn.Config{
 		RPID:          rpID,
 		RPDisplayName: name,
 		RPOrigins:     origins,
+		AuthenticatorSelection: protocol.AuthenticatorSelection{
+			UserVerification: protocol.VerificationRequired,
+		},
 	})
 }
 
-func (h *WebAuthnHandler) putSession(key string, data *webauthn.SessionData) {
+func genCeremonyID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// putSession сохраняет SessionData под случайным id, подметая просроченное и
+// ограничивая размер карты (защита от спама begin).
+func (h *WebAuthnHandler) putSession(id string, data *webauthn.SessionData) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
+	now := time.Now()
 	for k, s := range h.sessions {
-		if time.Since(s.at) > webAuthnSessionTTL {
+		if now.Sub(s.at) > webAuthnSessionTTL {
 			delete(h.sessions, k)
 		}
 	}
-	h.sessions[key] = webAuthnSession{data: data, at: time.Now()}
+	if len(h.sessions) >= maxWebAuthnSessions {
+		var oldestK string
+		var oldestT time.Time
+		first := true
+		for k, s := range h.sessions {
+			if first || s.at.Before(oldestT) {
+				oldestK, oldestT, first = k, s.at, false
+			}
+		}
+		delete(h.sessions, oldestK)
+	}
+	h.sessions[id] = webAuthnSession{data: data, at: now}
 }
 
-func (h *WebAuthnHandler) takeSession(key string) *webauthn.SessionData {
+func (h *WebAuthnHandler) takeSession(id string) *webauthn.SessionData {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	s, ok := h.sessions[key]
+	s, ok := h.sessions[id]
 	if !ok {
 		return nil
 	}
-	delete(h.sessions, key)
+	delete(h.sessions, id)
 	if time.Since(s.at) > webAuthnSessionTTL {
 		return nil
 	}
 	return s.data
 }
 
+func (h *WebAuthnHandler) setCeremonyCookie(w http.ResponseWriter, r *http.Request, name, path, id string) {
+	secure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	http.SetCookie(w, &http.Cookie{
+		Name:     name,
+		Value:    id,
+		Path:     path,
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(webAuthnSessionTTL.Seconds()),
+	})
+}
+
+func clearCeremonyCookie(w http.ResponseWriter, name, path string) {
+	http.SetCookie(w, &http.Cookie{Name: name, Path: path, MaxAge: -1, HttpOnly: true})
+}
+
+func cookieValue(r *http.Request, name string) string {
+	if c, err := r.Cookie(name); err == nil {
+		return c.Value
+	}
+	return ""
+}
+
 // HandleRegisterBegin — POST /api/account/passkey/register/begin (защищённый)
 func (h *WebAuthnHandler) HandleRegisterBegin(w http.ResponseWriter, r *http.Request) {
 	wa, err := h.webAuthn(r)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "webauthn не настроен: " + err.Error()})
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
 		return
 	}
 	user, err := h.userManager.WebAuthnUser()
@@ -123,7 +193,13 @@ func (h *WebAuthnHandler) HandleRegisterBegin(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	h.putSession("register:"+user.WebAuthnName(), session)
+	id, err := genCeremonyID()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "ошибка сессии"})
+		return
+	}
+	h.putSession(id, session)
+	h.setCeremonyCookie(w, r, registerCookie, registerPath, id)
 	writeJSON(w, http.StatusOK, options)
 }
 
@@ -131,7 +207,7 @@ func (h *WebAuthnHandler) HandleRegisterBegin(w http.ResponseWriter, r *http.Req
 func (h *WebAuthnHandler) HandleRegisterFinish(w http.ResponseWriter, r *http.Request) {
 	wa, err := h.webAuthn(r)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
 		return
 	}
 	user, err := h.userManager.WebAuthnUser()
@@ -140,7 +216,8 @@ func (h *WebAuthnHandler) HandleRegisterFinish(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	session := h.takeSession("register:" + user.WebAuthnName())
+	clearCeremonyCookie(w, registerCookie, registerPath)
+	session := h.takeSession(cookieValue(r, registerCookie))
 	if session == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "сессия регистрации истекла, начните заново"})
 		return
@@ -169,7 +246,7 @@ func (h *WebAuthnHandler) HandleLoginBegin(w http.ResponseWriter, r *http.Reques
 
 	wa, err := h.webAuthn(r)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
 		return
 	}
 	user, err := h.userManager.WebAuthnUser()
@@ -178,13 +255,19 @@ func (h *WebAuthnHandler) HandleLoginBegin(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	options, session, err := wa.BeginLogin(user)
+	options, session, err := wa.BeginLogin(user, webauthn.WithUserVerification(protocol.VerificationRequired))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
-	h.putSession("login:"+user.WebAuthnName(), session)
+	id, err := genCeremonyID()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "ошибка сессии"})
+		return
+	}
+	h.putSession(id, session)
+	h.setCeremonyCookie(w, r, loginCookie, loginPath, id)
 	writeJSON(w, http.StatusOK, options)
 }
 
@@ -192,7 +275,7 @@ func (h *WebAuthnHandler) HandleLoginBegin(w http.ResponseWriter, r *http.Reques
 func (h *WebAuthnHandler) HandleLoginFinish(w http.ResponseWriter, r *http.Request) {
 	wa, err := h.webAuthn(r)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
 		return
 	}
 	user, err := h.userManager.WebAuthnUser()
@@ -201,7 +284,8 @@ func (h *WebAuthnHandler) HandleLoginFinish(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	session := h.takeSession("login:" + user.WebAuthnName())
+	clearCeremonyCookie(w, loginCookie, loginPath)
+	session := h.takeSession(cookieValue(r, loginCookie))
 	if session == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "сессия входа истекла, начните заново"})
 		return
@@ -213,7 +297,7 @@ func (h *WebAuthnHandler) HandleLoginFinish(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Клонированный аутентификатор: счётчик подписей не вырос — это сигнал компрометации
+	// Клонированный аутентификатор: счётчик подписей не вырос — сигнал компрометации
 	if cred.Authenticator.CloneWarning {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "passkey отклонён (clone warning)"})
 		return
@@ -228,7 +312,7 @@ func (h *WebAuthnHandler) HandleLoginFinish(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	h.rateLimiter.Reset(strings.TrimSpace(clientIP(r)))
+	h.rateLimiter.Reset(clientIP(r, h.cfg.TrustProxyHeaders))
 	writeJSON(w, http.StatusOK, map[string]string{"token": token})
 }
 
