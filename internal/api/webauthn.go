@@ -61,7 +61,7 @@ func (h *WebAuthnHandler) webAuthn(r *http.Request) (*webauthn.WebAuthn, error) 
 
 	if rpID == "" {
 		if !h.cfg.TrustProxyHeaders {
-			return nil, fmt.Errorf("passkey не настроен: задайте webauthn_rp_id и webauthn_origins (или trust_proxy_headers за доверенным прокси)")
+			return nil, fmt.Errorf("passkey не настроен: задайте webauthn_rp_id (или trust_proxy_headers за доверенным прокси)")
 		}
 		host := r.Header.Get("X-Forwarded-Host")
 		if host == "" {
@@ -70,21 +70,16 @@ func (h *WebAuthnHandler) webAuthn(r *http.Request) (*webauthn.WebAuthn, error) 
 		if host == "" {
 			return nil, fmt.Errorf("не удалось определить host для passkey")
 		}
-		scheme := r.Header.Get("X-Forwarded-Proto")
-		if scheme == "" {
-			if r.TLS != nil {
-				scheme = "https"
-			} else {
-				scheme = "http"
-			}
-		}
-		if len(origins) == 0 {
-			origins = []string{scheme + "://" + host}
-		}
 		if i := strings.IndexByte(host, ':'); i >= 0 {
 			host = host[:i]
 		}
 		rpID = host
+	}
+
+	// Без явного списка origins разрешаем домен на стандартных HTTPS-портах
+	// KeenDNS, чтобы passkey работал и локально (443), и через облако (:8443 и т.п.).
+	if len(origins) == 0 {
+		origins = keenDNSOrigins(rpID)
 	}
 
 	return webauthn.New(&webauthn.Config{
@@ -95,6 +90,17 @@ func (h *WebAuthnHandler) webAuthn(r *http.Request) (*webauthn.WebAuthn, error) 
 			UserVerification: protocol.VerificationRequired,
 		},
 	})
+}
+
+// keenDNSOrigins разрешает RP-домен на портах, которые использует облако KeenDNS
+// для HTTPS (443 без порта + остальные из набора). RP ID без порта общий, поэтому
+// один passkey валиден на всех этих origin.
+func keenDNSOrigins(host string) []string {
+	origins := []string{"https://" + host}
+	for _, p := range []int{5083, 5443, 8083, 8443, 65083} {
+		origins = append(origins, fmt.Sprintf("https://%s:%d", host, p))
+	}
+	return origins
 }
 
 func genCeremonyID() (string, error) {
