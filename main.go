@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 	"xkeen-panel/internal/auth"
+	"xkeen-panel/internal/geoip"
 	"xkeen-panel/internal/models"
 	"xkeen-panel/internal/monitor"
 	"xkeen-panel/internal/server"
@@ -48,6 +49,22 @@ func main() {
 	eventBus := sse.NewEventBus()
 	watchdog.SetEventBus(eventBus)
 
+	// GeoIP — используем geoip.dat, который уже стоит для Xray
+	if geoPath := geoip.FindDat(cfg.GeoIPPath); geoPath == "" {
+		log.Printf("GeoIP: geoip.dat не найден (%s) — гео-фильтр по IP отключён, используется определение по имени", cfg.GeoIPPath)
+	} else if matcher, err := geoip.Load(geoPath, cfg.AutoSwitchAvoidCountries); err != nil {
+		log.Printf("GeoIP: ошибка загрузки %s: %v — гео-фильтр по IP отключён", geoPath, err)
+	} else {
+		watchdog.SetGeoIP(matcher)
+		log.Printf("GeoIP: загружен %s (избегаемые страны: %v)", geoPath, cfg.AutoSwitchAvoidCountries)
+	}
+
+	// Автостарт watchdog для unattended-режима
+	if cfg.WatchdogAutoStart && len(subManager.GetServers()) > 0 {
+		watchdog.SetActive(true)
+		log.Printf("Watchdog включён автоматически (watchdog_auto_start)")
+	}
+
 	// Публикация событий рестарта через SSE
 	xkeen.OnRestartStateChange = func(restarting bool) {
 		eventBus.Publish(sse.Event{
@@ -66,6 +83,11 @@ func main() {
 
 	// Запуск watchdog в горутине
 	go watchdog.Start(ctx)
+
+	// Периодическое автообновление подписки
+	if cfg.SubscriptionRefreshInterval > 0 {
+		go runSubscriptionRefresh(ctx, cfg, subManager, eventBus)
+	}
 
 	// Подготовка фронтенда
 	var frontendFS fs.FS
@@ -106,6 +128,66 @@ func main() {
 	}
 
 	log.Println("Сервер остановлен")
+}
+
+// runSubscriptionRefresh периодически обновляет подписку. Xray перезапускается
+// только если активный сервер реально заменился (исчез из подписки) — иначе
+// обновление не должно рвать соединение.
+func runSubscriptionRefresh(ctx context.Context, cfg *models.Config, sm *xkeen.SubscriptionManager, bus *sse.EventBus) {
+	interval := time.Duration(cfg.SubscriptionRefreshInterval) * time.Second
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			prevURI := ""
+			if a := sm.GetActiveServer(); a != nil {
+				prevURI = a.RawURI
+			}
+
+			var err error
+			for attempt := 0; attempt < 2; attempt++ {
+				if _, err = sm.Refresh(); err == nil {
+					break
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(30 * time.Second):
+				}
+			}
+			if err != nil {
+				log.Printf("[AUTO-UPDATE] Подписка не обновилась: %v", err)
+				bus.Publish(sse.Event{Type: "log", Data: tsLog("[AUTO-UPDATE] ошибка обновления подписки")})
+				continue
+			}
+
+			active := sm.GetActiveServer()
+			newURI := ""
+			if active != nil {
+				newURI = active.RawURI
+			}
+
+			if active != nil && newURI != prevURI {
+				if err := xkeen.UpdateOutbound(cfg.OutboundsFile, active); err != nil {
+					log.Printf("[AUTO-UPDATE] Ошибка конфига: %v", err)
+				} else {
+					xkeen.Restart(cfg.XKeenPath)
+					log.Printf("[AUTO-UPDATE] Активный сервер заменён, xray перезапущен")
+				}
+			}
+
+			bus.Publish(sse.Event{Type: "subscription", Data: map[string]bool{"updated": true}})
+			bus.Publish(sse.Event{Type: "log", Data: tsLog("[AUTO-UPDATE] подписка обновлена")})
+		}
+	}
+}
+
+func tsLog(msg string) string {
+	return time.Now().Format("2006-01-02 15:04:05") + " " + msg
 }
 
 func loadConfig(path string) (*models.Config, error) {
