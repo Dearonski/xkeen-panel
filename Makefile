@@ -18,19 +18,19 @@ build-frontend:
 
 build-arm64: build-frontend
 	GOOS=linux GOARCH=arm64 go build \
-		-ldflags="-s -w" \
+		-trimpath -ldflags="-s -w" \
 		-o build/xkeen-panel-aarch64 \
 		.
 
 build-mipsel: build-frontend
 	GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build \
-		-ldflags="-s -w" \
+		-trimpath -ldflags="-s -w" \
 		-o build/xkeen-panel-mipsel \
 		.
 
 build-all: build-frontend
-	GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o build/xkeen-panel-aarch64 .
-	GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -ldflags="-s -w" -o build/xkeen-panel-mipsel .
+	GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o build/xkeen-panel-aarch64 .
+	GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -trimpath -ldflags="-s -w" -o build/xkeen-panel-mipsel .
 
 build-local: build-frontend
 	go build -o build/xkeen-panel .
