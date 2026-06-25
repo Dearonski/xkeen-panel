@@ -184,10 +184,14 @@ func (um *UserManager) GenerateAccessKey() (string, error) {
 		return "", err
 	}
 
+	prevHash, prevHint := um.user.AccessKeyHash, um.user.AccessKeyHint
 	um.user.AccessKeyHash = string(hash)
 	um.user.AccessKeyHint = key[len(key)-4:]
 
+	// При ошибке записи откатываем in-memory состояние, иначе оно разойдётся с
+	// диском и клиентом (ключ объявлен включённым, но открытый ключ не отдан).
 	if err := um.persistLocked(); err != nil {
+		um.user.AccessKeyHash, um.user.AccessKeyHint = prevHash, prevHint
 		return "", err
 	}
 	return key, nil
@@ -229,9 +233,14 @@ func (um *UserManager) RevokeAccessKey() error {
 	if um.user == nil {
 		return os.ErrNotExist
 	}
+	prevHash, prevHint := um.user.AccessKeyHash, um.user.AccessKeyHint
 	um.user.AccessKeyHash = ""
 	um.user.AccessKeyHint = ""
-	return um.persistLocked()
+	if err := um.persistLocked(); err != nil {
+		um.user.AccessKeyHash, um.user.AccessKeyHint = prevHash, prevHint
+		return err
+	}
+	return nil
 }
 
 func generateRandomKey(length int) (string, error) {

@@ -86,7 +86,7 @@ func main() {
 
 	// Периодическое автообновление подписки
 	if cfg.SubscriptionRefreshInterval > 0 {
-		go runSubscriptionRefresh(ctx, cfg, subManager, eventBus)
+		go runSubscriptionRefresh(ctx, cfg, subManager, watchdog, eventBus)
 	}
 
 	// Подготовка фронтенда
@@ -133,7 +133,7 @@ func main() {
 // runSubscriptionRefresh периодически обновляет подписку. Xray перезапускается
 // только если активный сервер реально заменился (исчез из подписки) — иначе
 // обновление не должно рвать соединение.
-func runSubscriptionRefresh(ctx context.Context, cfg *models.Config, sm *xkeen.SubscriptionManager, bus *sse.EventBus) {
+func runSubscriptionRefresh(ctx context.Context, cfg *models.Config, sm *xkeen.SubscriptionManager, wd *monitor.Watchdog, bus *sse.EventBus) {
 	interval := time.Duration(cfg.SubscriptionRefreshInterval) * time.Second
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -171,12 +171,17 @@ func runSubscriptionRefresh(ctx context.Context, cfg *models.Config, sm *xkeen.S
 				newURI = active.RawURI
 			}
 
+			// Активный сервер сменился (старый исчез из подписки). Не перезапускаемся
+			// вслепую на servers[0] — он может оказаться в избегаемой стране; отдаём
+			// выбор гео-фильтру watchdog.
 			if active != nil && newURI != prevURI {
-				if err := xkeen.UpdateOutbound(cfg.OutboundsFile, active); err != nil {
-					log.Printf("[AUTO-UPDATE] Ошибка конфига: %v", err)
-				} else {
-					xkeen.Restart(cfg.XKeenPath)
-					log.Printf("[AUTO-UPDATE] Активный сервер заменён, xray перезапущен")
+				if target := wd.AllowedActiveOrBest(); target != nil {
+					if err := xkeen.UpdateOutbound(cfg.OutboundsFile, target); err != nil {
+						log.Printf("[AUTO-UPDATE] Ошибка конфига: %v", err)
+					} else {
+						xkeen.Restart(cfg.XKeenPath)
+						log.Printf("[AUTO-UPDATE] Активный сервер заменён на %s, xray перезапущен", target.Name)
+					}
 				}
 			}
 

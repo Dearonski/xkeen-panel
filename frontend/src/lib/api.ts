@@ -26,7 +26,9 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
 
     const resp = await fetch(url, { ...options, headers })
 
-    if (resp.status === 401) {
+    // Только для аутентифицированных запросов 401 = протухшая сессия. На самом
+    // логине (токена ещё нет) 401 — это неверные креды, его должна показать форма.
+    if (resp.status === 401 && token) {
         clearToken()
         window.location.href = '/login'
         throw new ApiError('Сессия истекла', 401)
