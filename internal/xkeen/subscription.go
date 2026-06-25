@@ -71,18 +71,7 @@ func (sm *SubscriptionManager) UpdateURL(url string) ([]models.Server, error) {
 
 	sm.mu.Lock()
 	sm.data.URL = url
-	sm.data.LastUpdated = time.Now()
-	sm.data.Servers = servers
-
-	// Если активный сервер вне диапазона — сбросить
-	if sm.data.ActiveID >= len(servers) {
-		sm.data.ActiveID = 0
-	}
-
-	// Пометить активный сервер
-	for i := range sm.data.Servers {
-		sm.data.Servers[i].Active = i == sm.data.ActiveID
-	}
+	sm.applyRefreshLocked(servers)
 	sm.mu.Unlock()
 
 	return servers, sm.Save()
@@ -104,17 +93,56 @@ func (sm *SubscriptionManager) Refresh() ([]models.Server, error) {
 	}
 
 	sm.mu.Lock()
-	sm.data.LastUpdated = time.Now()
-	sm.data.Servers = servers
-	if sm.data.ActiveID >= len(servers) {
-		sm.data.ActiveID = 0
-	}
-	for i := range sm.data.Servers {
-		sm.data.Servers[i].Active = i == sm.data.ActiveID
-	}
+	sm.applyRefreshLocked(servers)
 	sm.mu.Unlock()
 
 	return servers, sm.Save()
+}
+
+// applyRefreshLocked подменяет список серверов, сохраняя активный сервер по его
+// RawURI (а не по индексу) и перенося ручные override страны. Вызывать под sm.mu.
+func (sm *SubscriptionManager) applyRefreshLocked(servers []models.Server) {
+	var activeURI string
+	if sm.data.ActiveID >= 0 && sm.data.ActiveID < len(sm.data.Servers) {
+		activeURI = sm.data.Servers[sm.data.ActiveID].RawURI
+	}
+
+	carryOverrides(sm.data.Servers, servers)
+
+	sm.data.LastUpdated = time.Now()
+	sm.data.Servers = servers
+
+	newActive := 0
+	if activeURI != "" {
+		for i := range servers {
+			if servers[i].RawURI == activeURI {
+				newActive = i
+				break
+			}
+		}
+	}
+	sm.data.ActiveID = newActive
+	for i := range sm.data.Servers {
+		sm.data.Servers[i].Active = i == newActive
+	}
+}
+
+// carryOverrides переносит ручные CountryOverride со старого списка на новый по RawURI.
+func carryOverrides(old, fresh []models.Server) {
+	if len(old) == 0 {
+		return
+	}
+	overrides := make(map[string]string, len(old))
+	for i := range old {
+		if old[i].CountryOverride != "" && old[i].RawURI != "" {
+			overrides[old[i].RawURI] = old[i].CountryOverride
+		}
+	}
+	for i := range fresh {
+		if ov, ok := overrides[fresh[i].RawURI]; ok {
+			fresh[i].CountryOverride = ov
+		}
+	}
 }
 
 // GetData возвращает копию данных подписки
@@ -132,6 +160,37 @@ func (sm *SubscriptionManager) GetServers() []models.Server {
 	result := make([]models.Server, len(sm.data.Servers))
 	copy(result, sm.data.Servers)
 	return result
+}
+
+// UpdateLatencies сохраняет измеренные задержки обратно в подписку по RawURI,
+// чтобы UI показывал пинг сразу и не терял его при обновлении.
+func (sm *SubscriptionManager) UpdateLatencies(checked []models.Server) {
+	sm.mu.Lock()
+
+	byURI := make(map[string]int, len(checked))
+	for _, c := range checked {
+		if c.RawURI != "" {
+			byURI[c.RawURI] = c.Latency
+		}
+	}
+
+	now := time.Now()
+	for i := range sm.data.Servers {
+		if lat, ok := byURI[sm.data.Servers[i].RawURI]; ok {
+			sm.data.Servers[i].Latency = lat
+			sm.data.Servers[i].LastChecked = now
+		}
+	}
+
+	data, err := json.MarshalIndent(sm.data, "", "  ")
+	sm.mu.Unlock()
+
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(sm.dataDir, 0700); err == nil {
+		os.WriteFile(sm.filePath(), data, 0600)
+	}
 }
 
 // SetActive устанавливает активный сервер по ID

@@ -13,27 +13,48 @@ type Config struct {
 	CheckURL      string `yaml:"check_url"`
 	MaxFails      int    `yaml:"max_fails"`
 	LogFile       string `yaml:"log_file"`
+
+	// Автопилот: проверка задержек и переключение серверов
+	ProbeTimeoutMs     int  `yaml:"probe_timeout_ms"`
+	ProbeConcurrency   int  `yaml:"probe_concurrency"`
+	LatencyAutoSwitch  bool `yaml:"latency_auto_switch"`
+	LatencyThresholdMs int  `yaml:"latency_threshold_ms"`
+	LatencySwitchCount int  `yaml:"latency_switch_count"`
+	BlacklistTTLSec    int  `yaml:"blacklist_ttl_sec"`
+	WatchdogAutoStart  bool `yaml:"watchdog_auto_start"`
+
+	// Автообновление подписки
+	SubscriptionRefreshInterval int `yaml:"subscription_refresh_interval"`
+
+	// Гео-избегание при автопереключении
+	GeoIPPath                string   `yaml:"geoip_path"`
+	AutoSwitchAvoidCountries []string `yaml:"auto_switch_avoid_countries"`
 }
 
 // User — пользователь (data/user.json)
 type User struct {
-	Username     string    `json:"username"`
-	PasswordHash string    `json:"password_hash"`
-	TOTPSecret   string    `json:"totp_secret"`
-	JWTSecret    string    `json:"jwt_secret"`
-	CreatedAt    time.Time `json:"created_at"`
+	Username      string    `json:"username"`
+	PasswordHash  string    `json:"password_hash"`
+	TOTPSecret    string    `json:"totp_secret"`
+	JWTSecret     string    `json:"jwt_secret"`
+	CreatedAt     time.Time `json:"created_at"`
+	AccessKeyHash string    `json:"access_key_hash,omitempty"`
+	AccessKeyHint string    `json:"access_key_hint,omitempty"`
 }
 
 // Server — сервер из подписки
 type Server struct {
-	ID       int    `json:"id"`
-	Name     string `json:"name"`
-	Address  string `json:"address"`
-	Port     int    `json:"port"`
-	Protocol string `json:"protocol"`
-	Active   bool   `json:"active"`
-	Latency  int    `json:"latency_ms"`
-	RawURI   string `json:"raw_uri,omitempty"`
+	ID              int       `json:"id"`
+	Name            string    `json:"name"`
+	Address         string    `json:"address"`
+	Port            int       `json:"port"`
+	Protocol        string    `json:"protocol"`
+	Active          bool      `json:"active"`
+	Latency         int       `json:"latency_ms"`
+	RawURI          string    `json:"raw_uri,omitempty"`
+	LastChecked     time.Time `json:"last_checked,omitempty"`
+	Country         string    `json:"country,omitempty"`
+	CountryOverride string    `json:"country_override,omitempty"`
 }
 
 // SubscriptionData — подписка (data/subscription.json)

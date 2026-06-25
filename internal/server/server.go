@@ -67,7 +67,7 @@ func (s *Server) Handler() http.Handler {
 			r.Use(api.AuthMiddleware(s.userManager))
 
 			r.Get("/events", sse.HandleEvents(s.eventBus, s.watchdog))
-			r.Get("/servers/check", sse.HandleStreamLatency(s.subscription))
+			r.Get("/servers/check", sse.HandleStreamLatency(s.subscription, s.config.ProbeConcurrency, time.Duration(s.config.ProbeTimeoutMs)*time.Millisecond))
 		})
 
 		// Защищённые REST-маршруты — с JWT и таймаутом
