@@ -42,10 +42,12 @@ auto_switch_avoid_countries:    # Не переключаться автомат
 trust_proxy_headers: false
 
 # === Passkey (WebAuthn) ===
-# Для passkey нужен HTTPS-домен. Задай RP ID и origins явно (надёжнее всего):
+# Достаточно задать домен — passkey автоматически разрешается на стандартных
+# HTTPS-портах KeenDNS (443 без порта + 8443/5443/8083/5083/65083), так что
+# работает и локально, и через облако с :8443.
 # webauthn_rp_id: xkeen.superwifi.netcraze.link
 # webauthn_rp_name: XKeen Panel
-# webauthn_origins:
+# webauthn_origins:        # необязательно — переопределить список origin вручную
 #   - https://xkeen.superwifi.netcraze.link
-# Либо, если домен задать нельзя — включи trust_proxy_headers: true, и RP
-# выведется из X-Forwarded-Host/Proto (только за доверенным прокси!).
+# Если домен задать нельзя — trust_proxy_headers: true, и RP выведется из
+# X-Forwarded-Host (только за доверенным прокси!).
