@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { IconActivityHeartbeat } from '@tabler/icons-react'
 import { ServerCard } from './serverCard'
@@ -20,6 +20,7 @@ export function ServerList({
     loading: boolean
 }) {
     const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
+    const sentinelRef = useRef<HTMLDivElement>(null)
 
     const sorted = [...servers].sort((a, b) => {
         if (a.active) return -1
@@ -32,6 +33,23 @@ export function ServerList({
 
     const visible = sorted.slice(0, visibleCount)
     const hasMore = visibleCount < sorted.length
+
+    // Бесконечный скролл: подгружаем следующую страницу, когда sentinel виден
+    useEffect(() => {
+        if (!hasMore) return
+        const el = sentinelRef.current
+        if (!el) return
+        const obs = new IntersectionObserver(
+            entries => {
+                if (entries[0].isIntersecting) {
+                    setVisibleCount(c => c + PAGE_SIZE)
+                }
+            },
+            { rootMargin: '300px' },
+        )
+        obs.observe(el)
+        return () => obs.disconnect()
+    }, [hasMore, visible.length])
 
     return (
         <div className='space-y-3'>
@@ -65,15 +83,7 @@ export function ServerList({
                 ))}
             </div>
 
-            {hasMore && (
-                <Button
-                    variant='ghost'
-                    className='w-full text-muted-foreground'
-                    onClick={() => setVisibleCount(c => c + PAGE_SIZE)}
-                >
-                    Показать ещё ({sorted.length - visibleCount})
-                </Button>
-            )}
+            {hasMore && <div ref={sentinelRef} className='h-8' />}
 
             {servers.length === 0 && (
                 <div className='text-center py-8 text-muted-foreground text-sm'>
