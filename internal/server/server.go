@@ -50,6 +50,7 @@ func (s *Server) Handler() http.Handler {
 
 	// Хендлеры
 	authHandler := api.NewAuthHandler(s.userManager, rateLimiter)
+	webAuthnHandler := api.NewWebAuthnHandler(s.userManager, rateLimiter, s.config)
 	handlers := api.NewHandlers(s.config, s.subscription, s.watchdog)
 
 	// API-маршруты
@@ -61,6 +62,8 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/setup/confirm", authHandler.HandleSetupConfirm)
 			r.With(api.RateLimitMiddleware(rateLimiter)).Post("/login", authHandler.HandleLogin)
 			r.With(api.RateLimitMiddleware(rateLimiter)).Post("/login/key", authHandler.HandleLoginKey)
+			r.With(api.RateLimitMiddleware(rateLimiter)).Post("/login/passkey/begin", webAuthnHandler.HandleLoginBegin)
+			r.With(api.RateLimitMiddleware(rateLimiter)).Post("/login/passkey/finish", webAuthnHandler.HandleLoginFinish)
 		})
 
 		// SSE-маршруты — с JWT, без таймаута
@@ -91,6 +94,12 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/account/key", authHandler.HandleKeyStatus)
 			r.Post("/account/key", authHandler.HandleKeyGenerate)
 			r.Delete("/account/key", authHandler.HandleKeyRevoke)
+
+			// Управление passkey
+			r.Post("/account/passkey/register/begin", webAuthnHandler.HandleRegisterBegin)
+			r.Post("/account/passkey/register/finish", webAuthnHandler.HandleRegisterFinish)
+			r.Get("/account/passkey", webAuthnHandler.HandlePasskeyList)
+			r.Delete("/account/passkey", webAuthnHandler.HandlePasskeyDelete)
 
 			r.Post("/xkeen/restart", handlers.HandleRestart)
 			r.Post("/xkeen/update", handlers.HandleUpdate)

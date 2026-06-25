@@ -23,6 +23,7 @@ func (h *AuthHandler) HandleAuthStatus(w http.ResponseWriter, r *http.Request) {
 		"setup_required":     h.userManager.SetupRequired(),
 		"access_key_enabled": h.userManager.HasAccessKey(),
 		"access_key_hint":    h.userManager.AccessKeyHint(),
+		"passkey_enabled":    h.userManager.HasWebAuthnCredentials(),
 	})
 }
 

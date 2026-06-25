@@ -33,6 +33,7 @@ export type AuthStatus = {
     setup_required: boolean
     access_key_enabled?: boolean
     access_key_hint?: string
+    passkey_enabled?: boolean
 }
 
 export type AccessKeyStatus = {

@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/go-webauthn/webauthn/webauthn"
+)
 
 // Config — конфигурация приложения (config.yaml)
 type Config struct {
@@ -29,6 +33,12 @@ type Config struct {
 	// Гео-избегание при автопереключении
 	GeoIPPath                string   `yaml:"geoip_path"`
 	AutoSwitchAvoidCountries []string `yaml:"auto_switch_avoid_countries"`
+
+	// WebAuthn (passkey). Если RPID пуст — выводится из заголовков запроса
+	// (X-Forwarded-Host/Proto), что удобно за HTTPS-прокси.
+	WebAuthnRPID    string   `yaml:"webauthn_rp_id"`
+	WebAuthnRPName  string   `yaml:"webauthn_rp_name"`
+	WebAuthnOrigins []string `yaml:"webauthn_origins"`
 }
 
 // User — пользователь (data/user.json)
@@ -40,6 +50,9 @@ type User struct {
 	CreatedAt     time.Time `json:"created_at"`
 	AccessKeyHash string    `json:"access_key_hash,omitempty"`
 	AccessKeyHint string    `json:"access_key_hint,omitempty"`
+
+	WebAuthnID  []byte                `json:"webauthn_id,omitempty"`
+	Credentials []webauthn.Credential `json:"credentials,omitempty"`
 }
 
 // Server — сервер из подписки

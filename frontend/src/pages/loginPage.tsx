@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import {
     Card,
     CardContent,
@@ -10,10 +10,14 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { IconFingerprint } from '@tabler/icons-react'
 import { useAuth } from '@/hooks/useAuth'
+import { api } from '@/lib/api'
+import { passkeySupported } from '@/lib/webauthn'
+import type { AuthStatus } from '@/types'
 
 export function LoginPage() {
-    const { login, loginWithKey } = useAuth()
+    const { login, loginWithKey, loginWithPasskey } = useAuth()
     const [mode, setMode] = useState<'password' | 'key'>('password')
     const [username, setUsername] = useState('')
     const [password, setPassword] = useState('')
@@ -30,6 +34,18 @@ export function LoginPage() {
         mutationFn: () => loginWithKey(accessKey.trim()),
         onError: (err: Error) => setError(err.message),
     })
+
+    const authStatus = useQuery({
+        queryKey: ['authStatus'],
+        queryFn: () => api.get<AuthStatus>('/api/auth/status'),
+    })
+
+    const passkeyMutation = useMutation({
+        mutationFn: () => loginWithPasskey(),
+        onError: (err: Error) => setError(err.message),
+    })
+
+    const showPasskey = passkeySupported() && authStatus.data?.passkey_enabled
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault()
@@ -56,6 +72,30 @@ export function LoginPage() {
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
+                        {showPasskey && (
+                            <>
+                                <Button
+                                    type='button'
+                                    className='w-full'
+                                    onClick={() => {
+                                        setError('')
+                                        passkeyMutation.mutate()
+                                    }}
+                                    disabled={passkeyMutation.isPending}
+                                >
+                                    <IconFingerprint className='size-4' />
+                                    {passkeyMutation.isPending
+                                        ? 'Проверка...'
+                                        : 'Войти через passkey'}
+                                </Button>
+                                <div className='my-4 flex items-center gap-3 text-xs text-muted-foreground'>
+                                    <span className='h-px flex-1 bg-border' />
+                                    или
+                                    <span className='h-px flex-1 bg-border' />
+                                </div>
+                            </>
+                        )}
+
                         {error && (
                             <div className='mb-4 p-3 bg-destructive/10 border border-destructive/30 rounded-lg text-sm text-destructive'>
                                 {error}
