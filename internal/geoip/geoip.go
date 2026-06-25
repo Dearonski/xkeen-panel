@@ -4,6 +4,7 @@
 package geoip
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"net"
@@ -38,7 +39,10 @@ type resolveEntry struct {
 	at  time.Time
 }
 
-const resolveTTL = time.Hour
+const (
+	resolveTTL    = time.Hour
+	resolveNegTTL = time.Minute
+)
 
 // FindDat возвращает путь к существующему geoip.dat: сначала заданный в конфиге,
 // затем стандартные кандидаты. "" если ничего не найдено.
@@ -210,15 +214,26 @@ func (m *Matcher) resolve(address string) []net.IP {
 	}
 
 	m.resolveMu.Lock()
-	if e, ok := m.resolveCache[address]; ok && time.Since(e.at) < resolveTTL {
-		m.resolveMu.Unlock()
-		return e.ips
+	if e, ok := m.resolveCache[address]; ok {
+		ttl := resolveTTL
+		if len(e.ips) == 0 {
+			ttl = resolveNegTTL // негатив кэшируем коротко, чтобы не залипнуть на час
+		}
+		if time.Since(e.at) < ttl {
+			m.resolveMu.Unlock()
+			return e.ips
+		}
 	}
 	m.resolveMu.Unlock()
 
-	ips, err := net.LookupIP(address)
-	if err != nil {
-		return nil
+	// Таймаут обязателен: resolve вызывается из watchdog-горутины во время
+	// фейловера, а он часто срабатывает именно когда сеть/DNS недоступны.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	addrs, _ := net.DefaultResolver.LookupIPAddr(ctx, address)
+	ips := make([]net.IP, 0, len(addrs))
+	for _, a := range addrs {
+		ips = append(ips, a.IP)
 	}
 
 	m.resolveMu.Lock()
@@ -256,10 +271,12 @@ func walk(b []byte, fn func(field, wire int, varint uint64, ld []byte) bool) boo
 				return false
 			}
 			i += n
-			end := i + int(l)
-			if int(l) < 0 || end > len(b) {
+			// Сравниваем как uint64 до конвертации в int — иначе i+int(l) может
+			// переполнить знаковый int (особенно 32-битный на mipsle) и уйти в минус.
+			if l > uint64(len(b)-i) {
 				return false
 			}
+			end := i + int(l)
 			if !fn(field, wire, 0, b[i:end]) {
 				return true
 			}

@@ -168,14 +168,16 @@ func (w *Watchdog) check() {
 func (w *Watchdog) handleFailover(reason string) {
 	w.writeLog("[FAILOVER] %s — подбор лучшего сервера...", reason)
 
-	// Обновить подписку (активный сохраняется по RawURI)
-	if _, err := w.subscription.Refresh(); err != nil {
-		w.writeLog("[WARN] Не удалось обновить подписку: %v", err)
-	}
-
+	// Запомнить упавший сервер ДО обновления подписки — иначе, если он исчез из
+	// подписки, GetActiveServer вернёт уже servers[0] и в чёрный список уедет не тот.
 	prevURI := ""
 	if prev := w.subscription.GetActiveServer(); prev != nil {
 		prevURI = prev.RawURI
+	}
+
+	// Обновить подписку (активный сохраняется по RawURI)
+	if _, err := w.subscription.Refresh(); err != nil {
+		w.writeLog("[WARN] Не удалось обновить подписку: %v", err)
 	}
 
 	server, err := w.selectBest()
@@ -259,7 +261,30 @@ func (w *Watchdog) selectBest() (*models.Server, error) {
 		return nil, fmt.Errorf("ни один разрешённый сервер не ответил")
 	}
 
-	return w.subscription.SetActive(checked[best].ID)
+	// По RawURI, а не по индексу: между снимком и активацией мог пройти Refresh
+	return w.subscription.SetActiveByRawURI(checked[best].RawURI)
+}
+
+// AllowedActiveOrBest возвращает сервер, чей outbound нужно применить после
+// автообновления подписки. Если активный оказался в избегаемой стране (подписка
+// могла заменить его на servers[0] из RU/BY) — подбирает разрешённую замену.
+// Если замены нет — оставляет текущий (связность важнее), но это логируется.
+func (w *Watchdog) AllowedActiveOrBest() *models.Server {
+	active := w.subscription.GetActiveServer()
+	if active == nil {
+		return nil
+	}
+	if w.isServerAllowed(*active) {
+		return active
+	}
+
+	w.writeLog("[AUTO-UPDATE] активный сервер в избегаемой стране — подбор замены")
+	best, err := w.selectBest()
+	if err != nil {
+		w.writeLog("[AUTO-UPDATE] разрешённой замены нет (%v) — оставляю текущий", err)
+		return active
+	}
+	return best
 }
 
 // isServerAllowed решает, можно ли авто-переключиться на сервер. GeoIP — основной

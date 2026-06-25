@@ -146,11 +146,14 @@ func carryOverrides(old, fresh []models.Server) {
 	}
 }
 
-// GetData возвращает копию данных подписки
+// GetData возвращает копию данных подписки. Slice Servers копируется глубоко —
+// иначе вызывающий читал бы живой массив без блокировки (гонка с SetActive и др.).
 func (sm *SubscriptionManager) GetData() models.SubscriptionData {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	return *sm.data
+	d := *sm.data
+	d.Servers = append([]models.Server(nil), sm.data.Servers...)
+	return d
 }
 
 // GetServers возвращает список серверов
@@ -238,6 +241,44 @@ func (sm *SubscriptionManager) SetActive(id int) (*models.Server, error) {
 		return nil, err
 	}
 
+	if err := os.MkdirAll(sm.dataDir, 0700); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(sm.filePath(), data, 0600); err != nil {
+		return nil, err
+	}
+
+	return &server, nil
+}
+
+// SetActiveByRawURI активирует сервер по его стабильному RawURI под одной блокировкой.
+// Безопаснее SetActive(id), когда между снимком и активацией мог пройти Refresh
+// (id-индексы переезжают, RawURI — нет).
+func (sm *SubscriptionManager) SetActiveByRawURI(uri string) (*models.Server, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	idx := -1
+	for i := range sm.data.Servers {
+		if sm.data.Servers[i].RawURI == uri {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return nil, fmt.Errorf("сервер не найден по RawURI")
+	}
+
+	sm.data.ActiveID = idx
+	for i := range sm.data.Servers {
+		sm.data.Servers[i].Active = i == idx
+	}
+	server := sm.data.Servers[idx]
+
+	data, err := json.MarshalIndent(sm.data, "", "  ")
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(sm.dataDir, 0700); err != nil {
 		return nil, err
 	}
