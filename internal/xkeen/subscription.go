@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 	"xkeen-panel/internal/models"
@@ -191,6 +192,28 @@ func (sm *SubscriptionManager) UpdateLatencies(checked []models.Server) {
 	if err := os.MkdirAll(sm.dataDir, 0700); err == nil {
 		os.WriteFile(sm.filePath(), data, 0600)
 	}
+}
+
+// SetCountryOverride задаёт ручной override страны сервера (для строгого режима,
+// когда страна не распозналась автоматически).
+func (sm *SubscriptionManager) SetCountryOverride(id int, country string) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if id < 0 || id >= len(sm.data.Servers) {
+		return fmt.Errorf("сервер с id %d не найден", id)
+	}
+
+	sm.data.Servers[id].CountryOverride = strings.ToUpper(strings.TrimSpace(country))
+
+	data, err := json.MarshalIndent(sm.data, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(sm.dataDir, 0700); err != nil {
+		return err
+	}
+	return os.WriteFile(sm.filePath(), data, 0600)
 }
 
 // SetActive устанавливает активный сервер по ID

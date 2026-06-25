@@ -148,6 +148,92 @@ func (um *UserManager) GetUser() *models.User {
 	return &u
 }
 
+// persistLocked сохраняет текущего пользователя на диск. Вызывать под um.mu.
+func (um *UserManager) persistLocked() error {
+	if um.user == nil {
+		return os.ErrNotExist
+	}
+	if err := os.MkdirAll(um.dataDir, 0700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(um.user, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(um.userFilePath(), data, 0600)
+}
+
+// GenerateAccessKey создаёт новый ключ доступа, сохраняет его bcrypt-хэш и
+// возвращает ОТКРЫТЫЙ ключ один раз — повторно его получить нельзя.
+func (um *UserManager) GenerateAccessKey() (string, error) {
+	um.mu.Lock()
+	defer um.mu.Unlock()
+
+	if um.user == nil {
+		return "", os.ErrNotExist
+	}
+
+	raw, err := generateRandomKey(32)
+	if err != nil {
+		return "", err
+	}
+	key := "xk_" + raw
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(key), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+
+	um.user.AccessKeyHash = string(hash)
+	um.user.AccessKeyHint = key[len(key)-4:]
+
+	if err := um.persistLocked(); err != nil {
+		return "", err
+	}
+	return key, nil
+}
+
+// CheckAccessKey проверяет ключ доступа (constant-time через bcrypt).
+func (um *UserManager) CheckAccessKey(key string) bool {
+	um.mu.RLock()
+	defer um.mu.RUnlock()
+
+	if um.user == nil || um.user.AccessKeyHash == "" {
+		return false
+	}
+	return bcrypt.CompareHashAndPassword([]byte(um.user.AccessKeyHash), []byte(key)) == nil
+}
+
+// HasAccessKey сообщает, включён ли вход по ключу доступа.
+func (um *UserManager) HasAccessKey() bool {
+	um.mu.RLock()
+	defer um.mu.RUnlock()
+	return um.user != nil && um.user.AccessKeyHash != ""
+}
+
+// AccessKeyHint возвращает последние 4 символа ключа (косметика для UI).
+func (um *UserManager) AccessKeyHint() string {
+	um.mu.RLock()
+	defer um.mu.RUnlock()
+	if um.user == nil {
+		return ""
+	}
+	return um.user.AccessKeyHint
+}
+
+// RevokeAccessKey отключает вход по ключу доступа.
+func (um *UserManager) RevokeAccessKey() error {
+	um.mu.Lock()
+	defer um.mu.Unlock()
+
+	if um.user == nil {
+		return os.ErrNotExist
+	}
+	um.user.AccessKeyHash = ""
+	um.user.AccessKeyHint = ""
+	return um.persistLocked()
+}
+
 func generateRandomKey(length int) (string, error) {
 	bytes := make([]byte, length)
 	if _, err := rand.Read(bytes); err != nil {

@@ -140,6 +140,22 @@ func (h *Handlers) HandleCheckServers(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HandleSetCountry — POST /api/servers/country (ручной override страны)
+func (h *Handlers) HandleSetCountry(w http.ResponseWriter, r *http.Request) {
+	var req models.SetCountryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "неверный формат запроса"})
+		return
+	}
+
+	if err := h.subscription.SetCountryOverride(req.ID, req.Country); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
 // HandleRestart — POST /api/xkeen/restart
 func (h *Handlers) HandleRestart(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[RESTART-API] Кнопка рестарта нажата, xkeen_path=%s", h.config.XKeenPath)

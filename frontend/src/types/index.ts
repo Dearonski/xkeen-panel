@@ -6,6 +6,9 @@ export type Server = {
     protocol: 'vless' | 'vmess' | 'trojan' | 'shadowsocks'
     active: boolean
     latency_ms: number
+    country?: string
+    country_override?: string
+    last_checked?: string
 }
 
 export type Status = {
@@ -28,6 +31,13 @@ export type SubscriptionInfo = {
 
 export type AuthStatus = {
     setup_required: boolean
+    access_key_enabled?: boolean
+    access_key_hint?: string
+}
+
+export type AccessKeyStatus = {
+    has_key: boolean
+    hint: string
 }
 
 export type SetupResponse = {
