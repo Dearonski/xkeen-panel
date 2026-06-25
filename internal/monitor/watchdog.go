@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -65,6 +66,7 @@ func (w *Watchdog) publishStatus() {
 func (w *Watchdog) Start(ctx context.Context) {
 	// Открыть лог-файл
 	if w.config.LogFile != "" {
+		rotateLog(w.config.LogFile, 1<<20, 256<<10)
 		f, err := os.OpenFile(w.config.LogFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 		if err != nil {
 			log.Printf("Не удалось открыть лог-файл: %v", err)
@@ -331,6 +333,26 @@ func (w *Watchdog) ClearBlacklist(uri string) {
 	w.mu.Lock()
 	delete(w.blacklist, uri)
 	w.mu.Unlock()
+}
+
+// rotateLog усекает лог-файл на старте, если он превысил maxBytes, оставляя
+// последние keepBytes (с начала строки). На роутере лог не должен расти вечно.
+func rotateLog(path string, maxBytes, keepBytes int64) {
+	st, err := os.Stat(path)
+	if err != nil || st.Size() <= maxBytes {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	if int64(len(data)) > keepBytes {
+		data = data[int64(len(data))-keepBytes:]
+		if idx := bytes.IndexByte(data, '\n'); idx >= 0 && idx+1 <= len(data) {
+			data = data[idx+1:]
+		}
+	}
+	os.WriteFile(path, data, 0644)
 }
 
 func (w *Watchdog) writeLog(format string, args ...interface{}) {
