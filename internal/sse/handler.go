@@ -67,7 +67,10 @@ func HandleEvents(bus *EventBus, sp StatusProvider) http.HandlerFunc {
 }
 
 // HandleStreamLatency — SSE-поток проверки латенси серверов
-func HandleStreamLatency(sub *xkeen.SubscriptionManager) http.HandlerFunc {
+func HandleStreamLatency(sub *xkeen.SubscriptionManager, concurrency int, timeout time.Duration) http.HandlerFunc {
+	if concurrency <= 0 {
+		concurrency = 20
+	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
 		if !ok {
@@ -96,13 +99,16 @@ func HandleStreamLatency(sub *xkeen.SubscriptionManager) http.HandlerFunc {
 		}
 
 		results := make(chan result, len(servers))
+		sem := make(chan struct{}, concurrency)
 		var wg sync.WaitGroup
 
 		for _, s := range servers {
 			wg.Add(1)
+			sem <- struct{}{}
 			go func(srv models.Server) {
 				defer wg.Done()
-				latency := xkeen.CheckLatency(srv.Address, srv.Port, 3*time.Second)
+				defer func() { <-sem }()
+				latency := xkeen.CheckLatency(srv.Address, srv.Port, timeout)
 				results <- result{ID: srv.ID, Latency: latency}
 			}(s)
 		}
@@ -113,10 +119,12 @@ func HandleStreamLatency(sub *xkeen.SubscriptionManager) http.HandlerFunc {
 			close(results)
 		}()
 
+		latByID := make(map[int]int, len(servers))
 		for res := range results {
 			if r.Context().Err() != nil {
 				return
 			}
+			latByID[res.ID] = res.Latency
 
 			evt := Event{Type: "latency", Data: res}
 			data, err := FormatSSE(evt)
@@ -128,6 +136,14 @@ func HandleStreamLatency(sub *xkeen.SubscriptionManager) http.HandlerFunc {
 			}
 			flusher.Flush()
 		}
+
+		// Сохранить измеренные задержки в подписку
+		for i := range servers {
+			if lat, ok := latByID[servers[i].ID]; ok {
+				servers[i].Latency = lat
+			}
+		}
+		sub.UpdateLatencies(servers)
 
 		// Финальное событие
 		done := Event{Type: "done", Data: map[string]bool{"complete": true}}

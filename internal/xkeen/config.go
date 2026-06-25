@@ -253,6 +253,10 @@ func UpdateOutbound(outboundsPath string, server *models.Server) error {
 		return fmt.Errorf("RawURI пуст — невозможно сгенерировать конфиг. Обновите подписку")
 	}
 
+	if server.Protocol != "" && server.Protocol != "vless" {
+		return fmt.Errorf("автоконфигурация поддерживает только VLESS, протокол %q пока не поддержан", server.Protocol)
+	}
+
 	params, err := parseVLESSURI(server.RawURI)
 	if err != nil {
 		return fmt.Errorf("ошибка парсинга URI: %w", err)

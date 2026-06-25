@@ -124,6 +124,19 @@ func loadConfig(path string) (*models.Config, error) {
 		CheckURL:      "https://www.google.com",
 		MaxFails:      3,
 		LogFile:       "xkeen-panel.log",
+
+		ProbeTimeoutMs:     2000,
+		ProbeConcurrency:   20,
+		LatencyAutoSwitch:  true,
+		LatencyThresholdMs: 1000,
+		LatencySwitchCount: 3,
+		BlacklistTTLSec:    300,
+		WatchdogAutoStart:  true,
+
+		SubscriptionRefreshInterval: 21600,
+
+		GeoIPPath:                "/opt/etc/xray/dat/geoip_v2fly.dat",
+		AutoSwitchAvoidCountries: []string{"RU", "BY"},
 	}
 
 	if err := yaml.Unmarshal(data, cfg); err != nil {

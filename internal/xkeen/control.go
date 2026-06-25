@@ -15,6 +15,10 @@ var (
 	restartMu            sync.Mutex
 	restarting           bool
 	OnRestartStateChange func(restarting bool)
+
+	runningMu        sync.Mutex
+	runningCached    bool
+	runningCheckedAt time.Time
 )
 
 // Restart перезапускает Xray через xkeen -restart
@@ -96,9 +100,18 @@ func IsRestarting() bool {
 	return restarting
 }
 
-// IsRunning проверяет, запущен ли процесс xray
+// IsRunning проверяет, запущен ли процесс xray. Результат кэшируется на 2с —
+// форк busybox ps на каждый SSE-пуш/опрос статуса дорог на роутере.
 func IsRunning() bool {
+	runningMu.Lock()
+	defer runningMu.Unlock()
+
+	if time.Since(runningCheckedAt) < 2*time.Second {
+		return runningCached
+	}
+
 	cmd := exec.Command("sh", "-c", "busybox ps | grep -v grep | grep 'xray run'")
-	err := cmd.Run()
-	return err == nil
+	runningCached = cmd.Run() == nil
+	runningCheckedAt = time.Now()
+	return runningCached
 }

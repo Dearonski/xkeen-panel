@@ -61,6 +61,7 @@ func ParseSubscription(content string) ([]models.Server, error) {
 
 		server.ID = len(servers)
 		server.RawURI = line
+		server.Country = detectCountry(server.Name)
 		servers = append(servers, *server)
 	}
 
@@ -246,16 +247,24 @@ func CheckLatency(address string, port int, timeout time.Duration) int {
 	return int(time.Since(start).Milliseconds())
 }
 
-// CheckAllLatencies проверяет задержку всех серверов параллельно с общим таймаутом
-func CheckAllLatencies(servers []models.Server, timeout time.Duration) []models.Server {
+// CheckAllLatencies проверяет задержку всех серверов параллельно с ограничением
+// числа одновременных соединений — без лимита большая подписка кладёт роутер.
+func CheckAllLatencies(servers []models.Server, timeout time.Duration, concurrency int) []models.Server {
+	if concurrency <= 0 {
+		concurrency = 20
+	}
+
 	var wg sync.WaitGroup
 	result := make([]models.Server, len(servers))
 	copy(result, servers)
 
+	sem := make(chan struct{}, concurrency)
 	for i := range result {
 		wg.Add(1)
+		sem <- struct{}{}
 		go func(idx int) {
 			defer wg.Done()
+			defer func() { <-sem }()
 			result[idx].Latency = CheckLatency(result[idx].Address, result[idx].Port, timeout)
 		}(i)
 	}

@@ -129,7 +129,9 @@ func (h *Handlers) HandleSelectServer(w http.ResponseWriter, r *http.Request) {
 // HandleCheckServers — POST /api/servers/check
 func (h *Handlers) HandleCheckServers(w http.ResponseWriter, r *http.Request) {
 	servers := h.subscription.GetServers()
-	checked := xkeen.CheckAllLatencies(servers, 3*time.Second)
+	timeout := time.Duration(h.config.ProbeTimeoutMs) * time.Millisecond
+	checked := xkeen.CheckAllLatencies(servers, timeout, h.config.ProbeConcurrency)
+	h.subscription.UpdateLatencies(checked)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"servers": checked,
 	})

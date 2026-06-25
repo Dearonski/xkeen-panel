@@ -16,3 +16,22 @@ max_fails: 3               # Фейлов подряд до переключен
 
 # Лог-файл watchdog'а
 log_file: /opt/var/log/xkeen-panel.log
+
+# === Автопилот ===
+probe_timeout_ms: 2000          # Таймаут TCP-пинга сервера
+probe_concurrency: 20           # Лимит одновременных пингов (важно для роутера)
+latency_auto_switch: true       # Переключаться при высоком пинге, а не только при обрыве
+latency_threshold_ms: 1000      # Порог высокого пинга
+latency_switch_count: 3         # Сколько проверок подряд выше порога до переключения
+blacklist_ttl_sec: 300          # На сколько исключать сервер после фейловера
+watchdog_auto_start: true       # Включать watchdog автоматически при старте
+
+# Автообновление подписки (секунды, 0 = выключено)
+subscription_refresh_interval: 21600
+
+# === Гео-избегание при автопереключении ===
+# Используем geoip.dat, который уже стоит для Xray
+geoip_path: /opt/etc/xray/dat/geoip_v2fly.dat
+auto_switch_avoid_countries:    # Не переключаться автоматически на серверы этих стран
+  - RU
+  - BY
