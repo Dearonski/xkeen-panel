@@ -1,10 +1,13 @@
 package xkeen
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -101,7 +104,7 @@ func IsRestarting() bool {
 }
 
 // IsRunning проверяет, запущен ли процесс xray. Результат кэшируется на 2с —
-// форк busybox ps на каждый SSE-пуш/опрос статуса дорог на роутере.
+// проверка на каждый SSE-пуш/опрос статуса иначе дорога на роутере.
 func IsRunning() bool {
 	runningMu.Lock()
 	defer runningMu.Unlock()
@@ -110,8 +113,39 @@ func IsRunning() bool {
 		return runningCached
 	}
 
-	cmd := exec.Command("sh", "-c", "busybox ps | grep -v grep | grep 'xray run'")
-	runningCached = cmd.Run() == nil
+	runningCached = xrayProcessRunning()
 	runningCheckedAt = time.Now()
 	return runningCached
+}
+
+// xrayProcessRunning ищет процесс xray через /proc — надёжнее, чем grep по выводу
+// ps (формат busybox ps на разных роутерах отличается и обрезает аргументы).
+func xrayProcessRunning() bool {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		// Нет /proc (например, macOS при разработке) — запасной путь через ps
+		out, _ := exec.Command("sh", "-c", "ps | grep -v grep | grep xray").Output()
+		return len(bytes.TrimSpace(out)) > 0
+	}
+
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if _, err := strconv.Atoi(e.Name()); err != nil {
+			continue
+		}
+		data, err := os.ReadFile("/proc/" + e.Name() + "/cmdline")
+		if err != nil {
+			continue
+		}
+		cmd := string(bytes.ReplaceAll(data, []byte{0}, []byte{' '}))
+		if strings.Contains(cmd, "xkeen-panel") {
+			continue // не считать саму панель
+		}
+		if strings.Contains(cmd, "xray") {
+			return true
+		}
+	}
+	return false
 }
