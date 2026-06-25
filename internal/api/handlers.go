@@ -103,6 +103,9 @@ func (h *Handlers) HandleSelectServer(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[SELECT] Сервер: %s (%s:%d), RawURI len=%d", server.Name, server.Address, server.Port, len(server.RawURI))
 
+	// Ручной выбор снимает сервер с чёрного списка автопереключения
+	h.watchdog.ClearBlacklist(server.RawURI)
+
 	// Обновить конфиг Xray (04_outbounds.json) — генерирует полный outbound из URI
 	if err := xkeen.UpdateOutbound(h.config.OutboundsFile, server); err != nil {
 		log.Printf("[SELECT] Ошибка UpdateOutbound: %v", err)
