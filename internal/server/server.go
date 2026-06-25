@@ -61,7 +61,6 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/setup", authHandler.HandleSetup)
 			r.Post("/setup/confirm", authHandler.HandleSetupConfirm)
 			r.With(api.RateLimitMiddleware(rateLimiter, s.config.TrustProxyHeaders)).Post("/login", authHandler.HandleLogin)
-			r.With(api.RateLimitMiddleware(rateLimiter, s.config.TrustProxyHeaders)).Post("/login/key", authHandler.HandleLoginKey)
 			r.With(api.RateLimitMiddleware(rateLimiter, s.config.TrustProxyHeaders)).Post("/login/passkey/begin", webAuthnHandler.HandleLoginBegin)
 			r.With(api.RateLimitMiddleware(rateLimiter, s.config.TrustProxyHeaders)).Post("/login/passkey/finish", webAuthnHandler.HandleLoginFinish)
 		})
@@ -89,11 +88,6 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/servers/select", handlers.HandleSelectServer)
 			r.Post("/servers/check", handlers.HandleCheckServers)
 			r.Post("/servers/country", handlers.HandleSetCountry)
-
-			// Управление ключом доступа
-			r.Get("/account/key", authHandler.HandleKeyStatus)
-			r.Post("/account/key", authHandler.HandleKeyGenerate)
-			r.Delete("/account/key", authHandler.HandleKeyRevoke)
 
 			// Управление passkey
 			r.Post("/account/passkey/register/begin", webAuthnHandler.HandleRegisterBegin)
