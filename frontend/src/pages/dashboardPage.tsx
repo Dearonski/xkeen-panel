@@ -7,7 +7,6 @@ import { StatusBadge } from '@/components/statusBadge'
 import { SubscriptionForm } from '@/components/subscriptionForm'
 import { ServerList } from '@/components/serverList'
 import { Controls } from '@/components/controls'
-import { AccessKeyCard } from '@/components/accessKeyCard'
 import { PasskeyCard } from '@/components/passkeyCard'
 import { LogViewer } from '@/components/logViewer'
 import { Button } from '@/components/ui/button'
@@ -188,7 +187,6 @@ export function DashboardPage() {
                             }
                         />
                         <PasskeyCard />
-                        <AccessKeyCard />
                         <LogViewer
                             logs={logs.data ?? []}
                             onRefresh={() =>

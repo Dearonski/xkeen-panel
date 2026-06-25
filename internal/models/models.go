@@ -48,13 +48,11 @@ type Config struct {
 
 // User — пользователь (data/user.json)
 type User struct {
-	Username      string    `json:"username"`
-	PasswordHash  string    `json:"password_hash"`
-	TOTPSecret    string    `json:"totp_secret"`
-	JWTSecret     string    `json:"jwt_secret"`
-	CreatedAt     time.Time `json:"created_at"`
-	AccessKeyHash string    `json:"access_key_hash,omitempty"`
-	AccessKeyHint string    `json:"access_key_hint,omitempty"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"password_hash"`
+	TOTPSecret   string    `json:"totp_secret"`
+	JWTSecret    string    `json:"jwt_secret"`
+	CreatedAt    time.Time `json:"created_at"`
 
 	WebAuthnID  []byte                `json:"webauthn_id,omitempty"`
 	Credentials []webauthn.Credential `json:"credentials,omitempty"`
@@ -112,11 +110,6 @@ type LoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 	TOTPCode string `json:"totp_code"`
-}
-
-// AccessKeyLoginRequest — вход по ключу доступа (без TOTP)
-type AccessKeyLoginRequest struct {
-	AccessKey string `json:"access_key"`
 }
 
 // SelectServerRequest — выбор сервера

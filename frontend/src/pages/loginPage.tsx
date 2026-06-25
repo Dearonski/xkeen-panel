@@ -17,21 +17,14 @@ import { passkeySupported } from '@/lib/webauthn'
 import type { AuthStatus } from '@/types'
 
 export function LoginPage() {
-    const { login, loginWithKey, loginWithPasskey } = useAuth()
-    const [mode, setMode] = useState<'password' | 'key'>('password')
+    const { login, loginWithPasskey } = useAuth()
     const [username, setUsername] = useState('')
     const [password, setPassword] = useState('')
     const [totpCode, setTotpCode] = useState('')
-    const [accessKey, setAccessKey] = useState('')
     const [error, setError] = useState('')
 
     const loginMutation = useMutation({
         mutationFn: () => login(username, password, totpCode),
-        onError: (err: Error) => setError(err.message),
-    })
-
-    const keyMutation = useMutation({
-        mutationFn: () => loginWithKey(accessKey.trim()),
         onError: (err: Error) => setError(err.message),
     })
 
@@ -53,12 +46,6 @@ export function LoginPage() {
         loginMutation.mutate()
     }
 
-    const handleKeySubmit = (e: React.FormEvent) => {
-        e.preventDefault()
-        setError('')
-        keyMutation.mutate()
-    }
-
     return (
         <div className='min-h-screen flex items-center justify-center p-4'>
             <div className='w-full max-w-md'>
@@ -66,9 +53,7 @@ export function LoginPage() {
                     <CardHeader className='text-center'>
                         <CardTitle className='text-2xl'>XKeen Panel</CardTitle>
                         <CardDescription>
-                            {mode === 'password'
-                                ? 'Вход в панель управления'
-                                : 'Вход по ключу доступа'}
+                            Вход в панель управления
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -102,128 +87,67 @@ export function LoginPage() {
                             </div>
                         )}
 
-                        {mode === 'password' ? (
-                            <form
-                                onSubmit={handleSubmit}
-                                className='space-y-4'
-                                autoComplete='on'
-                            >
-                                <div className='space-y-2'>
-                                    <Label htmlFor='login-username'>Логин</Label>
-                                    <Input
-                                        id='login-username'
-                                        name='username'
-                                        autoComplete='username'
-                                        value={username}
-                                        onChange={e =>
-                                            setUsername(e.target.value)
-                                        }
-                                        required
-                                        autoFocus
-                                    />
-                                </div>
-                                <div className='space-y-2'>
-                                    <Label htmlFor='login-password'>Пароль</Label>
-                                    <Input
-                                        id='login-password'
-                                        name='password'
-                                        type='password'
-                                        autoComplete='current-password'
-                                        value={password}
-                                        onChange={e =>
-                                            setPassword(e.target.value)
-                                        }
-                                        required
-                                    />
-                                </div>
-                                <div className='space-y-2'>
-                                    <Label htmlFor='login-totp'>TOTP-код</Label>
-                                    <Input
-                                        id='login-totp'
-                                        name='totp'
-                                        type='text'
-                                        inputMode='numeric'
-                                        autoComplete='one-time-code'
-                                        pattern='[0-9]*'
-                                        maxLength={6}
-                                        value={totpCode}
-                                        onChange={e =>
-                                            setTotpCode(
-                                                e.target.value.replace(
-                                                    /\D/g,
-                                                    '',
-                                                ),
-                                            )
-                                        }
-                                        placeholder='000000'
-                                        required
-                                        className='text-center text-xl tracking-[0.3em] placeholder:tracking-[0.3em]'
-                                    />
-                                </div>
-                                <Button
-                                    type='submit'
-                                    disabled={
-                                        loginMutation.isPending ||
-                                        totpCode.length !== 6
-                                    }
-                                    className='w-full'
-                                >
-                                    {loginMutation.isPending
-                                        ? 'Вход...'
-                                        : 'Войти'}
-                                </Button>
-                            </form>
-                        ) : (
-                            <form
-                                onSubmit={handleKeySubmit}
-                                className='space-y-4'
-                                autoComplete='on'
-                            >
-                                <div className='space-y-2'>
-                                    <Label htmlFor='login-key'>
-                                        Ключ доступа
-                                    </Label>
-                                    <Input
-                                        id='login-key'
-                                        name='password'
-                                        type='password'
-                                        autoComplete='current-password'
-                                        value={accessKey}
-                                        onChange={e =>
-                                            setAccessKey(e.target.value)
-                                        }
-                                        placeholder='xk_...'
-                                        required
-                                        autoFocus
-                                    />
-                                </div>
-                                <Button
-                                    type='submit'
-                                    disabled={
-                                        keyMutation.isPending ||
-                                        accessKey.trim().length === 0
-                                    }
-                                    className='w-full'
-                                >
-                                    {keyMutation.isPending ? 'Вход...' : 'Войти'}
-                                </Button>
-                            </form>
-                        )}
-
-                        <button
-                            type='button'
-                            onClick={() => {
-                                setError('')
-                                setMode(m =>
-                                    m === 'password' ? 'key' : 'password',
-                                )
-                            }}
-                            className='mt-4 w-full text-center text-sm text-muted-foreground hover:text-foreground transition-colors'
+                        <form
+                            onSubmit={handleSubmit}
+                            className='space-y-4'
+                            autoComplete='on'
                         >
-                            {mode === 'password'
-                                ? 'Войти по ключу доступа'
-                                : 'Войти по логину и паролю'}
-                        </button>
+                            <div className='space-y-2'>
+                                <Label htmlFor='login-username'>Логин</Label>
+                                <Input
+                                    id='login-username'
+                                    name='username'
+                                    autoComplete='username'
+                                    value={username}
+                                    onChange={e => setUsername(e.target.value)}
+                                    required
+                                    autoFocus
+                                />
+                            </div>
+                            <div className='space-y-2'>
+                                <Label htmlFor='login-password'>Пароль</Label>
+                                <Input
+                                    id='login-password'
+                                    name='password'
+                                    type='password'
+                                    autoComplete='current-password'
+                                    value={password}
+                                    onChange={e => setPassword(e.target.value)}
+                                    required
+                                />
+                            </div>
+                            <div className='space-y-2'>
+                                <Label htmlFor='login-totp'>TOTP-код</Label>
+                                <Input
+                                    id='login-totp'
+                                    name='totp'
+                                    type='text'
+                                    inputMode='numeric'
+                                    autoComplete='one-time-code'
+                                    pattern='[0-9]*'
+                                    maxLength={6}
+                                    value={totpCode}
+                                    onChange={e =>
+                                        setTotpCode(
+                                            e.target.value.replace(/\D/g, ''),
+                                        )
+                                    }
+                                    placeholder='000000'
+                                    required
+                                    className='text-center text-xl tracking-[0.3em] placeholder:tracking-[0.3em]'
+                                />
+                            </div>
+                            <Button
+                                type='submit'
+                                disabled={
+                                    loginMutation.isPending ||
+                                    totpCode.length !== 6
+                                }
+                                className='w-full'
+                            >
+                                {loginMutation.isPending ? 'Вход...' : 'Войти'}
+                            </Button>
+                        </form>
                     </CardContent>
                 </Card>
             </div>
