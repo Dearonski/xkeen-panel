@@ -27,8 +27,7 @@ export function PasskeyCard() {
     })
 
     const remove = useMutation({
-        mutationFn: (id: string) =>
-            api.del('/api/account/passkey', { id }),
+        mutationFn: (id: string) => api.del('/api/account/passkey', { id }),
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['passkeys'] })
             qc.invalidateQueries({ queryKey: ['authStatus'] })
@@ -36,6 +35,7 @@ export function PasskeyCard() {
     })
 
     const keys = list.data?.passkeys ?? []
+    const hasKey = keys.length > 0
 
     return (
         <Card>
@@ -47,52 +47,37 @@ export function PasskeyCard() {
             </CardHeader>
             <CardContent className='space-y-3'>
                 <p className='text-xs text-muted-foreground'>
-                    Вход по Face ID / отпечатку, без пароля и TOTP. Работает
-                    только по HTTPS-домену (не по локальному IP).
+                    Вход по Face ID / отпечатку, без пароля и TOTP.
                 </p>
-
-                {!supported && (
-                    <div className='text-xs text-amber-400'>
-                        Браузер не поддерживает passkey на этом адресе. Откройте
-                        панель по HTTPS-домену.
-                    </div>
-                )}
 
                 {error && (
                     <div className='text-xs text-destructive'>{error}</div>
                 )}
 
-                {keys.length > 0 && (
-                    <ul className='space-y-1'>
-                        {keys.map(id => (
-                            <li
-                                key={id}
-                                className='flex items-center justify-between gap-2 text-xs'
-                            >
-                                <span className='font-mono text-muted-foreground truncate'>
-                                    passkey · {id.slice(0, 10)}…
-                                </span>
-                                <button
-                                    type='button'
-                                    onClick={() => remove.mutate(id)}
-                                    disabled={remove.isPending}
-                                    className='text-muted-foreground hover:text-destructive shrink-0'
-                                >
-                                    <IconTrash className='size-4' />
-                                </button>
-                            </li>
-                        ))}
-                    </ul>
+                {hasKey ? (
+                    <div className='flex items-center justify-between gap-2 text-xs'>
+                        <span className='font-mono text-muted-foreground truncate'>
+                            passkey · {keys[0].slice(0, 10)}…
+                        </span>
+                        <button
+                            type='button'
+                            onClick={() => remove.mutate(keys[0])}
+                            disabled={remove.isPending}
+                            className='text-muted-foreground hover:text-destructive shrink-0'
+                        >
+                            <IconTrash className='size-4' />
+                        </button>
+                    </div>
+                ) : (
+                    <Button
+                        size='sm'
+                        variant='outline'
+                        onClick={() => add.mutate()}
+                        disabled={!supported || add.isPending}
+                    >
+                        {add.isPending ? 'Создание...' : 'Добавить passkey'}
+                    </Button>
                 )}
-
-                <Button
-                    size='sm'
-                    variant='outline'
-                    onClick={() => add.mutate()}
-                    disabled={!supported || add.isPending}
-                >
-                    {add.isPending ? 'Создание...' : 'Добавить passkey'}
-                </Button>
             </CardContent>
         </Card>
     )
