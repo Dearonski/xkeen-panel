@@ -7,6 +7,7 @@ export function useEventSource() {
     const qc = useQueryClient()
     const esRef = useRef<EventSource | null>(null)
     const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+    const attempt = useRef(0)
 
     useEffect(() => {
         function connect() {
@@ -15,6 +16,10 @@ export function useEventSource() {
 
             const es = new EventSource(`/api/events?token=${token}`)
             esRef.current = es
+
+            es.onopen = () => {
+                attempt.current = 0
+            }
 
             es.addEventListener('status', e => {
                 const status: Status = JSON.parse(e.data)
@@ -40,6 +45,12 @@ export function useEventSource() {
                 )
             })
 
+            // Автообновление подписки на сервере — обновить данные в UI
+            es.addEventListener('subscription', () => {
+                qc.invalidateQueries({ queryKey: ['subscription'] })
+                qc.invalidateQueries({ queryKey: ['servers'] })
+            })
+
             es.onerror = () => {
                 es.close()
                 esRef.current = null
@@ -51,8 +62,11 @@ export function useEventSource() {
                     return
                 }
 
-                // Реконнект через 3 секунды
-                reconnectTimer.current = setTimeout(connect, 3000)
+                // Экспоненциальный backoff: 3с → 6с → 12с ... cap 30с,
+                // чтобы долгий обрыв не долбил роутер
+                const delay = Math.min(30000, 3000 * 2 ** attempt.current)
+                attempt.current += 1
+                reconnectTimer.current = setTimeout(connect, delay)
             }
         }
 

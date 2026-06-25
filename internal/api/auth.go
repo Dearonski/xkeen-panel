@@ -19,8 +19,10 @@ func NewAuthHandler(um *auth.UserManager, rl *RateLimiter) *AuthHandler {
 
 // HandleAuthStatus — GET /api/auth/status
 func (h *AuthHandler) HandleAuthStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]bool{
-		"setup_required": h.userManager.SetupRequired(),
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"setup_required":     h.userManager.SetupRequired(),
+		"access_key_enabled": h.userManager.HasAccessKey(),
+		"access_key_hint":    h.userManager.AccessKeyHint(),
 	})
 }
 
@@ -104,10 +106,7 @@ func (h *AuthHandler) HandleSetupConfirm(w http.ResponseWriter, r *http.Request)
 
 // HandleLogin — POST /api/auth/login
 func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
-	ip := r.RemoteAddr
-	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-		ip = strings.Split(forwarded, ",")[0]
-	}
+	ip := clientIP(r)
 
 	var req models.LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -136,6 +135,75 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	h.rateLimiter.Reset(strings.TrimSpace(ip))
 
 	writeJSON(w, http.StatusOK, map[string]string{"token": token})
+}
+
+// HandleLoginKey — POST /api/auth/login/key (вход по ключу доступа, без TOTP)
+func (h *AuthHandler) HandleLoginKey(w http.ResponseWriter, r *http.Request) {
+	ip := clientIP(r)
+
+	var req models.AccessKeyLoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "неверный формат запроса"})
+		return
+	}
+
+	if req.AccessKey == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "ключ доступа обязателен"})
+		return
+	}
+
+	if !h.userManager.CheckAccessKey(req.AccessKey) {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "неверный ключ доступа"})
+		return
+	}
+
+	user := h.userManager.GetUser()
+	token, err := auth.GenerateToken(user.Username, user.JWTSecret)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "ошибка генерации токена"})
+		return
+	}
+
+	h.rateLimiter.Reset(strings.TrimSpace(ip))
+	writeJSON(w, http.StatusOK, map[string]string{"token": token})
+}
+
+// HandleKeyStatus — GET /api/account/key (защищённый)
+func (h *AuthHandler) HandleKeyStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"has_key": h.userManager.HasAccessKey(),
+		"hint":    h.userManager.AccessKeyHint(),
+	})
+}
+
+// HandleKeyGenerate — POST /api/account/key (создать/перевыпустить ключ)
+func (h *AuthHandler) HandleKeyGenerate(w http.ResponseWriter, r *http.Request) {
+	key, err := h.userManager.GenerateAccessKey()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "ошибка генерации ключа"})
+		return
+	}
+	// Открытый ключ отдаётся ровно один раз
+	writeJSON(w, http.StatusOK, map[string]string{
+		"access_key": key,
+		"hint":       key[len(key)-4:],
+	})
+}
+
+// HandleKeyRevoke — DELETE /api/account/key (отключить вход по ключу)
+func (h *AuthHandler) HandleKeyRevoke(w http.ResponseWriter, r *http.Request) {
+	if err := h.userManager.RevokeAccessKey(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "ошибка отзыва ключа"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+func clientIP(r *http.Request) string {
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+		return strings.Split(forwarded, ",")[0]
+	}
+	return r.RemoteAddr
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {

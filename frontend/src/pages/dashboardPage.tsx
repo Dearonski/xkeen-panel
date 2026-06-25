@@ -7,6 +7,7 @@ import { StatusBadge } from '@/components/statusBadge'
 import { SubscriptionForm } from '@/components/subscriptionForm'
 import { ServerList } from '@/components/serverList'
 import { Controls } from '@/components/controls'
+import { AccessKeyCard } from '@/components/accessKeyCard'
 import { LogViewer } from '@/components/logViewer'
 import { Button } from '@/components/ui/button'
 import { IconLogout, IconLoader2 } from '@tabler/icons-react'
@@ -100,6 +101,12 @@ export function DashboardPage() {
         },
     })
 
+    const setCountry = useMutation({
+        mutationFn: ({ id, country }: { id: number; country: string }) =>
+            api.post('/api/servers/country', { id, country }),
+        onSettled: () => qc.invalidateQueries({ queryKey: ['servers'] }),
+    })
+
     const toggleWatchdog = useMutation({
         mutationFn: (active: boolean) =>
             api.post('/api/watchdog/toggle', { active }),
@@ -179,6 +186,7 @@ export function DashboardPage() {
                                 restarting
                             }
                         />
+                        <AccessKeyCard />
                         <LogViewer
                             logs={logs.data ?? []}
                             onRefresh={() =>
@@ -191,6 +199,9 @@ export function DashboardPage() {
                         <ServerList
                             servers={servers.data ?? []}
                             onSelect={id => selectServer.mutate(id)}
+                            onSetCountry={(id, country) =>
+                                setCountry.mutate({ id, country })
+                            }
                             onCheckAll={checkLatency}
                             loading={
                                 selectServer.isPending ||

@@ -18,6 +18,18 @@ export const useAuth = () => {
         [navigate],
     )
 
+    const loginWithKey = useCallback(
+        async (accessKey: string) => {
+            const data = await api.post<{ token: string }>(
+                '/api/auth/login/key',
+                { access_key: accessKey },
+            )
+            setToken(data.token)
+            navigate('/')
+        },
+        [navigate],
+    )
+
     const logout = useCallback(() => {
         clearToken()
         navigate('/login')
@@ -27,6 +39,7 @@ export const useAuth = () => {
         token: getToken(),
         isAuthenticated: !!getToken(),
         login,
+        loginWithKey,
         logout,
     }
 }

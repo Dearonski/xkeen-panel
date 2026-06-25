@@ -9,11 +9,13 @@ const PAGE_SIZE = 12
 export function ServerList({
     servers,
     onSelect,
+    onSetCountry,
     onCheckAll,
     loading,
 }: {
     servers: Server[]
     onSelect: (id: number) => void
+    onSetCountry?: (id: number, country: string) => void
     onCheckAll: () => void
     loading: boolean
 }) {
@@ -57,6 +59,7 @@ export function ServerList({
                         key={server.id}
                         server={server}
                         onSelect={onSelect}
+                        onSetCountry={onSetCountry}
                         loading={loading}
                     />
                 ))}

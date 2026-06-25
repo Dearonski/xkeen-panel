@@ -60,6 +60,7 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/setup", authHandler.HandleSetup)
 			r.Post("/setup/confirm", authHandler.HandleSetupConfirm)
 			r.With(api.RateLimitMiddleware(rateLimiter)).Post("/login", authHandler.HandleLogin)
+			r.With(api.RateLimitMiddleware(rateLimiter)).Post("/login/key", authHandler.HandleLoginKey)
 		})
 
 		// SSE-маршруты — с JWT, без таймаута
@@ -84,6 +85,12 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/servers", handlers.HandleGetServers)
 			r.Post("/servers/select", handlers.HandleSelectServer)
 			r.Post("/servers/check", handlers.HandleCheckServers)
+			r.Post("/servers/country", handlers.HandleSetCountry)
+
+			// Управление ключом доступа
+			r.Get("/account/key", authHandler.HandleKeyStatus)
+			r.Post("/account/key", authHandler.HandleKeyGenerate)
+			r.Delete("/account/key", authHandler.HandleKeyRevoke)
 
 			r.Post("/xkeen/restart", handlers.HandleRestart)
 			r.Post("/xkeen/update", handlers.HandleUpdate)

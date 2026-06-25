@@ -96,9 +96,20 @@ type LoginRequest struct {
 	TOTPCode string `json:"totp_code"`
 }
 
+// AccessKeyLoginRequest — вход по ключу доступа (без TOTP)
+type AccessKeyLoginRequest struct {
+	AccessKey string `json:"access_key"`
+}
+
 // SelectServerRequest — выбор сервера
 type SelectServerRequest struct {
 	ID int `json:"id"`
+}
+
+// SetCountryRequest — ручной override страны сервера
+type SetCountryRequest struct {
+	ID      int    `json:"id"`
+	Country string `json:"country"`
 }
 
 // UpdateSubscriptionRequest — обновление подписки
