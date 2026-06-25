@@ -171,6 +171,12 @@ func cookieValue(r *http.Request, name string) string {
 
 // HandleRegisterBegin — POST /api/account/passkey/register/begin (защищённый)
 func (h *WebAuthnHandler) HandleRegisterBegin(w http.ResponseWriter, r *http.Request) {
+	// Поддерживается ровно один passkey — чтобы добавить новый, сначала удалить текущий
+	if h.userManager.HasWebAuthnCredentials() {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "passkey уже добавлен — сначала удалите текущий"})
+		return
+	}
+
 	wa, err := h.webAuthn(r)
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
