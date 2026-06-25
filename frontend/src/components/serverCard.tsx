@@ -46,7 +46,11 @@ export function ServerCard({
     )
 
     const country = server.country_override || server.country
-    const flag = codeToFlag(country)
+    // Имя сервера часто уже содержит флаг-эмодзи — не дублируем своим.
+    const nameHasFlag = /\p{Regional_Indicator}\p{Regional_Indicator}/u.test(
+        server.name,
+    )
+    const flag = nameHasFlag ? '' : codeToFlag(country)
 
     const saveCountry = () => {
         onSetCountry?.(server.id, value.trim().toUpperCase())
