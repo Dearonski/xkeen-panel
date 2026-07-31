@@ -1,13 +1,21 @@
 # XKeen Panel
 
-Web panel for managing [XKeen](https://github.com/Jenya-XKeen/XKeen)/Xray on Keenetic routers.
+Web panel for managing [XKeen](https://github.com/jameszeroX/XKeen)/Xray on Keenetic routers.
+
+Supports both the jameszeroX fork (**XKeen 2.x**, `S05xkeen`) and the original
+Skrill0 layout (1.x, `S24xray`) — the layout, the active proxy core
+(Xray/Mihomo) and the proxying mode are detected at startup.
 
 ![dashboard](https://img.shields.io/badge/stack-Go%20%2B%20React-blue)
 
 ## Features
 
 - **Subscription management** — add URL, refresh server list
-- **Server selection** — switch active server with automatic Xray restart
+- **Server selection** — switch active server, with the config validated
+  (`xkeen -xtest`) and rolled back before anything restarts
+- **Balancer pool** — build a `leastPing` pool out of the subscription so Xray
+  picks the node itself and leaves a dead one without a restart
+- **XKeen settings** — edit `xkeen.json`, proxying ports and IP exclusions
 - **Latency check** — real-time per-server ping streaming (SSE)
 - **Watchdog** — automatic connection monitoring and failover to next server
 - **Real-time logs** — via Server-Sent Events, no polling
@@ -18,7 +26,7 @@ Web panel for managing [XKeen](https://github.com/Jenya-XKeen/XKeen)/Xray on Kee
 ### Requirements
 
 - Keenetic router with [Entware](https://help.keenetic.com/hc/ru/articles/360021214160)
-- [XKeen](https://github.com/Jenya-XKeen/XKeen) installed
+- [XKeen](https://github.com/jameszeroX/XKeen) installed (2.x or 1.x)
 - `curl` package (`opkg install curl`)
 
 ### Quick install
@@ -56,7 +64,6 @@ port: 3000
 data_dir: /opt/etc/xkeen-panel/data
 xkeen_path: /opt/sbin/xkeen
 outbounds_file: /opt/etc/xray/configs/04_outbounds.json
-init_script: /opt/etc/init.d/S24xray
 check_interval: 120
 check_url: https://www.google.com
 max_fails: 3
@@ -130,15 +137,38 @@ File: `/opt/etc/xkeen-panel/config.yaml`
 | `data_dir` | `/opt/etc/xkeen-panel/data` | Data directory |
 | `xkeen_path` | `/opt/sbin/xkeen` | Path to XKeen binary |
 | `outbounds_file` | `/opt/etc/xray/configs/04_outbounds.json` | Xray outbounds config |
+| `xray_config_dir` | auto | Xray config directory |
+| `routing_file` | auto | Routing config; auto-detected among the config files |
+| `mihomo_config` | auto | `/opt/etc/mihomo/config.yaml` |
+| `xkeen_json` | auto | `/opt/etc/xkeen/xkeen.json` |
+| `xray_api_addr` | `127.0.0.1:10085` | Xray gRPC API, used to pin a pool node |
 | `check_interval` | `120` | Watchdog check interval (seconds) |
 | `check_url` | `https://www.google.com` | URL for connection check |
 | `max_fails` | `3` | Consecutive failures before server switch |
+
+Paths left empty are detected on startup, so an install that moved its configs
+only needs the ones that differ.
+
+## How the panel edits your config
+
+- **The outbound shape is preserved.** Xray accepts both `settings.vnext[]` and
+  the newer flat `settings.{address,port,id}`; whichever your config uses is
+  kept, and so is `raw` as the spelling of the `tcp` transport.
+- **`streamSettings.sockopt` survives.** XKeen validates `sockopt.mark` on every
+  real outbound — strict PBR refuses to start without it — so the panel merges
+  its changes over the existing outbound instead of replacing it.
+- **Comments are read, not written.** Xray configs legally carry `//` and
+  `/* */`; the panel parses through them, but a file it writes comes back
+  without them. The previous content is always kept as `.bak` next to the file.
+- **Every write is validated.** After writing, `xkeen -xtest` (or `-mtest`) runs
+  the core's own parser; a rejected config is restored from the backup and the
+  error is shown instead of restarting into a broken state.
 
 ## Building from source
 
 ```sh
 # Requirements
-go 1.23+
+go 1.25+
 node 20+
 
 # Build for all architectures

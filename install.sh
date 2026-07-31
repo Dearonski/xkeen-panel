@@ -67,9 +67,11 @@ port: 3000
 data_dir: /opt/etc/xkeen-panel/data
 
 # === Пути XKeen/Xray ===
+# Раскладка XKeen (S05xkeen/S24xray), активное ядро и режим проксирования
+# определяются автоматически — задавать пути ниже нужно только при
+# нестандартной установке.
 xkeen_path: /opt/sbin/xkeen
 outbounds_file: /opt/etc/xray/configs/04_outbounds.json
-init_script: /opt/etc/init.d/S24xray
 
 # === Watchdog ===
 check_interval: 120
