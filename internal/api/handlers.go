@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"time"
+	"xkeen-panel/internal/mihomo"
 	"xkeen-panel/internal/models"
 	"xkeen-panel/internal/monitor"
 	"xkeen-panel/internal/xkeen"
@@ -114,6 +115,31 @@ func (h *Handlers) HandleSelectServer(w http.ResponseWriter, r *http.Request) {
 
 	rt := h.detector.Runtime()
 
+	// У Mihomo нет outbound'ов Xray: панель приводит список proxies к подписке,
+	// а конкретную ноду выбирает proxy-group самого ядра
+	if rt.Core == xkeen.CoreMihomo {
+		if err := h.syncMihomo(rt); err != nil {
+			log.Printf("[SELECT] Ошибка конфига Mihomo: %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+
+		go func() {
+			if _, err := xkeen.Restart(rt.Dispatcher); err != nil {
+				log.Printf("[SELECT] Ошибка рестарта: %v", err)
+			}
+		}()
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success":    true,
+			"server":     server,
+			"restarting": true,
+			"core":       rt.Core,
+			"note":       "конфигурация Mihomo синхронизирована с подпиской; активную ноду выбирает proxy-group",
+		})
+		return
+	}
+
 	// В режиме пула ноду выбирает балансировщик, а ручной выбор — это override
 	// через api ядра: мгновенно и без рестарта
 	if top := h.detector.Topology(); top.Mode == xkeen.TopologyPool {
@@ -174,6 +200,61 @@ func (h *Handlers) pinPoolNode(rt xkeen.Runtime, top xkeen.Topology, serverID in
 	}
 
 	return nil
+}
+
+// syncMihomo приводит proxies в config.yaml к подписке и проверяет результат
+// парсером самого ядра (`xkeen -mtest`), откатывая файл при ошибке.
+func (h *Handlers) syncMihomo(rt xkeen.Runtime) error {
+	cfg, err := mihomo.Read(rt.MihomoConf)
+	if err != nil {
+		return err
+	}
+
+	if _, err := cfg.SyncProxies(h.subscription.GetServers()); err != nil {
+		return err
+	}
+	if err := cfg.Write(); err != nil {
+		return err
+	}
+
+	if !rt.Installed || rt.Dispatcher == "" {
+		return nil
+	}
+
+	output, err := xkeen.TestConfig(rt.Dispatcher, rt.Core)
+	if err == nil {
+		return nil
+	}
+
+	if rbErr := mihomo.RestoreBackup(rt.MihomoConf); rbErr != nil {
+		return fmt.Errorf("конфигурация mihomo не прошла проверку, откат не удался: %v (%s)", rbErr, output)
+	}
+
+	return fmt.Errorf("конфигурация mihomo не прошла проверку, изменения отменены: %s", xkeen.TailLines(output, 4))
+}
+
+// HandleMihomoSync — POST /api/mihomo/sync
+func (h *Handlers) HandleMihomoSync(w http.ResponseWriter, r *http.Request) {
+	rt := h.detector.Runtime()
+	if rt.Core != xkeen.CoreMihomo {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "активное ядро — " + rt.Core + "; переключите ядро командой `xkeen -mihomo`",
+		})
+		return
+	}
+
+	if err := h.syncMihomo(rt); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	go func() {
+		if _, err := xkeen.Restart(rt.Dispatcher); err != nil {
+			log.Printf("[MIHOMO] Ошибка рестарта: %v", err)
+		}
+	}()
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "restarting": true})
 }
 
 // HandleCheckServers — POST /api/servers/check

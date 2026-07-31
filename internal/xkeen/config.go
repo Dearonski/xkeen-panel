@@ -98,8 +98,9 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	return os.Rename(tmpName, path)
 }
 
-// vlessParams — все параметры из VLESS URI
-type vlessParams struct {
+// VLESSParams — все параметры из VLESS URI. Экспортирован: генератор конфига
+// Mihomo строит proxies из тех же полей.
+type VLESSParams struct {
 	UUID        string
 	Address     string
 	Port        int
@@ -119,8 +120,8 @@ type vlessParams struct {
 	Extra       string // JSON из параметра extra (для xhttp: downloadSettings, xmux и т.д.)
 }
 
-// parseVLESSURI полностью парсит VLESS URI
-func parseVLESSURI(uri string) (*vlessParams, error) {
+// ParseVLESS полностью парсит VLESS URI
+func ParseVLESS(uri string) (*VLESSParams, error) {
 	u, err := url.Parse(uri)
 	if err != nil {
 		return nil, err
@@ -136,7 +137,7 @@ func parseVLESSURI(uri string) (*vlessParams, error) {
 	}
 
 	q := u.Query()
-	return &vlessParams{
+	return &VLESSParams{
 		UUID:        u.User.Username(),
 		Address:     u.Hostname(),
 		Port:        port,
@@ -160,7 +161,7 @@ func parseVLESSURI(uri string) (*vlessParams, error) {
 // buildOutboundFromURI генерирует ПОЛНЫЙ outbound из VLESS URI.
 // tag — тег из существующего конфига (чтобы совпадал с routing),
 // format — форма записи учётных данных, снятая с существующего конфига.
-func buildOutboundFromURI(p *vlessParams, tag string, format outboundFormat) map[string]interface{} {
+func buildOutboundFromURI(p *VLESSParams, tag string, format outboundFormat) map[string]interface{} {
 	settings := buildVLESSSettings(p, format)
 
 	// StreamSettings
@@ -302,7 +303,7 @@ func UpdateOutbound(outboundsPath string, server *models.Server) error {
 		return fmt.Errorf("автоконфигурация поддерживает только VLESS, протокол %q пока не поддержан", server.Protocol)
 	}
 
-	params, err := parseVLESSURI(server.RawURI)
+	params, err := ParseVLESS(server.RawURI)
 	if err != nil {
 		return fmt.Errorf("ошибка парсинга URI: %w", err)
 	}

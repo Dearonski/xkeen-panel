@@ -109,6 +109,8 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/xkeen/lists/{name}", handlers.HandleGetList)
 			r.Put("/xkeen/lists/{name}", handlers.HandleUpdateList)
 
+			r.Post("/mihomo/sync", handlers.HandleMihomoSync)
+
 			r.Get("/pool", handlers.HandlePoolStatus)
 			r.Post("/pool/enable", handlers.HandlePoolEnable)
 			r.Post("/pool/disable", handlers.HandlePoolDisable)

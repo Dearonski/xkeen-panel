@@ -145,7 +145,7 @@ func DisablePool(rt Runtime, outboundsPath string, server *models.Server, state 
 		return fmt.Errorf("outbounds не найдены в %s", outboundsPath)
 	}
 
-	params, err := parseVLESSURI(server.RawURI)
+	params, err := ParseVLESS(server.RawURI)
 	if err != nil {
 		return fmt.Errorf("ошибка парсинга URI: %w", err)
 	}

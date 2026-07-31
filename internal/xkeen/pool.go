@@ -39,7 +39,7 @@ func BuildPoolOutbounds(servers []models.Server, selector string, template map[s
 			continue
 		}
 
-		params, err := parseVLESSURI(server.RawURI)
+		params, err := ParseVLESS(server.RawURI)
 		if err != nil {
 			continue
 		}
@@ -91,7 +91,7 @@ func PoolMatchesSubscription(outboundsPath string, servers []models.Server, sele
 		if server.RawURI == "" || (server.Protocol != "" && server.Protocol != "vless") {
 			continue
 		}
-		params, err := parseVLESSURI(server.RawURI)
+		params, err := ParseVLESS(server.RawURI)
 		if err != nil {
 			continue
 		}

@@ -65,7 +65,7 @@ func canonicalNetwork(n string) string {
 }
 
 // buildVLESSSettings renders the credentials in the requested shape.
-func buildVLESSSettings(p *vlessParams, format outboundFormat) map[string]interface{} {
+func buildVLESSSettings(p *VLESSParams, format outboundFormat) map[string]interface{} {
 	encryption := p.Encryption
 	if encryption == "" {
 		encryption = "none"

@@ -12,9 +12,9 @@ const realityURI = "vless://11111111-2222-3333-4444-555555555555@1.2.3.4:443?typ
 const wsURI = "vless://22222222-3333-4444-5555-666666666666@host.example:443?type=ws&host=h.com&path=/p&security=tls&sni=s.com"
 
 func TestParseVLESSURIReality(t *testing.T) {
-	p, err := parseVLESSURI(realityURI)
+	p, err := ParseVLESS(realityURI)
 	if err != nil {
-		t.Fatalf("parseVLESSURI: %v", err)
+		t.Fatalf("ParseVLESS: %v", err)
 	}
 
 	checks := []struct {
@@ -43,9 +43,9 @@ func TestParseVLESSURIReality(t *testing.T) {
 }
 
 func TestBuildOutboundReality(t *testing.T) {
-	p, err := parseVLESSURI(realityURI)
+	p, err := ParseVLESS(realityURI)
 	if err != nil {
-		t.Fatalf("parseVLESSURI: %v", err)
+		t.Fatalf("ParseVLESS: %v", err)
 	}
 
 	ob := buildOutboundFromURI(p, "vless-reality", formatVNext)
@@ -73,9 +73,9 @@ func TestBuildOutboundReality(t *testing.T) {
 }
 
 func TestBuildOutboundWS(t *testing.T) {
-	p, err := parseVLESSURI(wsURI)
+	p, err := ParseVLESS(wsURI)
 	if err != nil {
-		t.Fatalf("parseVLESSURI: %v", err)
+		t.Fatalf("ParseVLESS: %v", err)
 	}
 
 	ob := buildOutboundFromURI(p, "vless-ws", formatVNext)

@@ -130,6 +130,16 @@ export function DashboardPage() {
         },
     })
 
+    const syncMihomo = useMutation({
+        mutationFn: () => api.post('/api/mihomo/sync'),
+        onMutate: () => {
+            qc.setQueryData<Status>(['status'], old =>
+                old ? { ...old, restarting: true } : old,
+            )
+        },
+        onSettled: () => qc.invalidateQueries({ queryKey: ['status'] }),
+    })
+
     const setCountry = useMutation({
         mutationFn: ({ id, country }: { id: number; country: string }) =>
             api.post('/api/servers/country', { id, country }),
@@ -223,7 +233,12 @@ export function DashboardPage() {
                             onEnablePool={() => poolAction.mutate('enable')}
                             onDisablePool={() => poolAction.mutate('disable')}
                             onSyncPool={() => poolAction.mutate('sync')}
-                            loading={poolAction.isPending || restarting}
+                            onSyncMihomo={() => syncMihomo.mutate()}
+                            loading={
+                                poolAction.isPending ||
+                                syncMihomo.isPending ||
+                                restarting
+                            }
                         />
                         <SettingsCard />
                         <PasskeyCard />

@@ -168,6 +168,14 @@ func (w *Watchdog) check() {
 }
 
 func (w *Watchdog) handleFailover(reason string) {
+	// У Mihomo переключение делает proxy-group (url-test/fallback) внутри ядра.
+	// Переписывать конфиг здесь нечего: список proxies синхронизируется при
+	// обновлении подписки, а рестарт только оборвал бы соединения.
+	if rt := w.detector.Runtime(); rt.Core == xkeen.CoreMihomo {
+		w.writeLog("[MIHOMO] %s — переключение выполняет proxy-group ядра, конфиг не трогаем", reason)
+		return
+	}
+
 	// В режиме пула ноду выбирает балансировщик ядра (leastPing + observatory),
 	// и делает это без рестарта. Задача watchdog здесь — состав пула, а не выбор.
 	if top := w.detector.Topology(); top.Mode == xkeen.TopologyPool {

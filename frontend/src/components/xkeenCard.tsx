@@ -11,6 +11,7 @@ export function XKeenCard({
     onEnablePool,
     onDisablePool,
     onSyncPool,
+    onSyncMihomo,
     loading,
 }: {
     status: Status | undefined
@@ -18,11 +19,13 @@ export function XKeenCard({
     onEnablePool: () => void
     onDisablePool: () => void
     onSyncPool: () => void
+    onSyncMihomo: () => void
     loading: boolean
 }) {
     const [confirming, setConfirming] = useState(false)
 
     const isPool = pool?.mode === 'pool'
+    const isMihomo = status?.core === 'mihomo'
 
     const confirmEnable = () => {
         if (confirming) {
@@ -72,7 +75,25 @@ export function XKeenCard({
                     )}
                 </dl>
 
-                {isPool ? (
+                {isMihomo ? (
+                    <>
+                        <Button
+                            variant='outline'
+                            className='w-full'
+                            onClick={onSyncMihomo}
+                            disabled={loading}
+                        >
+                            <IconRefresh className='size-4' />
+                            Синхронизировать proxies с подпиской
+                        </Button>
+                        <p className='text-xs text-muted-foreground'>
+                            Панель приводит секцию <code>proxies</code> в
+                            config.yaml к подписке и обновляет списки в
+                            proxy-groups. Активную ноду выбирает сама группа
+                            (url-test / select), а не панель.
+                        </p>
+                    </>
+                ) : isPool ? (
                     <>
                         <Button
                             variant='outline'
