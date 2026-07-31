@@ -83,9 +83,9 @@ func TestLoadAndMatch(t *testing.T) {
 		{"1.2.3.5", "RU", true},
 		{"95.100.200.1", "RU", true},
 		{"178.124.5.5", "BY", true},
-		{"5.6.7.5", "", false},   // NL не загружали — не избегается
-		{"8.8.8.8", "", false},   // вне всех диапазонов
-		{"1.2.4.0", "", false},   // соседний /24, вне диапазона
+		{"5.6.7.5", "", false}, // NL was not loaded, so it is not avoided
+		{"8.8.8.8", "", false}, // outside every range
+		{"1.2.4.0", "", false}, // the neighbouring /24, out of range
 	}
 	for _, c := range cases {
 		cc, ok := m.Match(net.ParseIP(c.ip))

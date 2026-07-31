@@ -17,7 +17,7 @@ type UserManager struct {
 	dataDir string
 	user    *models.User
 	mu      sync.RWMutex
-	// Временное хранение данных setup до подтверждения TOTP
+	// Holds the setup data until TOTP is confirmed
 	pendingSetup *models.User
 }
 
@@ -29,7 +29,7 @@ func (um *UserManager) userFilePath() string {
 	return filepath.Join(um.dataDir, "user.json")
 }
 
-// Load загружает пользователя из файла
+// Load reads the stored user.
 func (um *UserManager) Load() error {
 	um.mu.Lock()
 	defer um.mu.Unlock()
@@ -50,14 +50,14 @@ func (um *UserManager) Load() error {
 	return nil
 }
 
-// SetupRequired возвращает true, если пользователь ещё не создан
+// SetupRequired reports whether no account exists yet.
 func (um *UserManager) SetupRequired() bool {
 	um.mu.RLock()
 	defer um.mu.RUnlock()
 	return um.user == nil
 }
 
-// CreatePendingUser создаёт пользователя в памяти (до подтверждения TOTP)
+// CreatePendingUser builds the account in memory, before TOTP is confirmed.
 func (um *UserManager) CreatePendingUser(username, password, totpSecret string) error {
 	um.mu.Lock()
 	defer um.mu.Unlock()
@@ -82,7 +82,7 @@ func (um *UserManager) CreatePendingUser(username, password, totpSecret string) 
 	return nil
 }
 
-// ConfirmSetup сохраняет pending-пользователя на диск
+// ConfirmSetup persists the pending account.
 func (um *UserManager) ConfirmSetup() error {
 	um.mu.Lock()
 	defer um.mu.Unlock()
@@ -109,7 +109,7 @@ func (um *UserManager) ConfirmSetup() error {
 	return nil
 }
 
-// GetPendingTOTPSecret возвращает TOTP-секрет из pending setup
+// GetPendingTOTPSecret returns the TOTP secret of the pending setup.
 func (um *UserManager) GetPendingTOTPSecret() string {
 	um.mu.RLock()
 	defer um.mu.RUnlock()
@@ -119,14 +119,14 @@ func (um *UserManager) GetPendingTOTPSecret() string {
 	return um.pendingSetup.TOTPSecret
 }
 
-// HasPendingSetup возвращает true, если setup начат но не завершён
+// HasPendingSetup reports whether setup was started but not finished.
 func (um *UserManager) HasPendingSetup() bool {
 	um.mu.RLock()
 	defer um.mu.RUnlock()
 	return um.pendingSetup != nil
 }
 
-// CheckPassword проверяет пароль пользователя
+// CheckPassword verifies the account password.
 func (um *UserManager) CheckPassword(username, password string) bool {
 	um.mu.RLock()
 	defer um.mu.RUnlock()
@@ -137,7 +137,7 @@ func (um *UserManager) CheckPassword(username, password string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(um.user.PasswordHash), []byte(password)) == nil
 }
 
-// GetUser возвращает копию пользователя
+// GetUser returns a copy of the account.
 func (um *UserManager) GetUser() *models.User {
 	um.mu.RLock()
 	defer um.mu.RUnlock()
@@ -148,7 +148,7 @@ func (um *UserManager) GetUser() *models.User {
 	return &u
 }
 
-// persistLocked сохраняет текущего пользователя на диск. Вызывать под um.mu.
+// persistLocked writes the current account to disk. Call with um.mu held.
 func (um *UserManager) persistLocked() error {
 	if um.user == nil {
 		return os.ErrNotExist

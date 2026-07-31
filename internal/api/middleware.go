@@ -13,13 +13,13 @@ type contextKey string
 
 const usernameKey contextKey = "username"
 
-// AuthMiddleware проверяет JWT-токен в заголовке Authorization
+// AuthMiddleware validates the JWT from the Authorization header.
 func AuthMiddleware(userManager *auth.UserManager) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			header := r.Header.Get("Authorization")
 
-			// Fallback на query param token (EventSource не поддерживает заголовки)
+			// Fall back to the token query param: EventSource cannot send headers
 			if header == "" {
 				if t := r.URL.Query().Get("token"); t != "" {
 					header = "Bearer " + t
@@ -55,10 +55,10 @@ func AuthMiddleware(userManager *auth.UserManager) func(http.Handler) http.Handl
 	}
 }
 
-// RateLimiter — простой rate limiter для login
+// RateLimiter is a simple per-IP limiter for login attempts.
 type RateLimiter struct {
-	mu       sync.Mutex
-	attempts map[string][]time.Time
+	mu          sync.Mutex
+	attempts    map[string][]time.Time
 	maxAttempts int
 	window      time.Duration
 }
@@ -71,7 +71,7 @@ func NewRateLimiter(maxAttempts int, window time.Duration) *RateLimiter {
 	}
 }
 
-// Allow проверяет, разрешён ли запрос с данного IP
+// Allow reports whether a request from this IP may proceed.
 func (rl *RateLimiter) Allow(ip string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
@@ -79,7 +79,7 @@ func (rl *RateLimiter) Allow(ip string) bool {
 	now := time.Now()
 	cutoff := now.Add(-rl.window)
 
-	// Очистить старые попытки
+	// Drop attempts outside the window
 	var recent []time.Time
 	for _, t := range rl.attempts[ip] {
 		if t.After(cutoff) {
@@ -96,14 +96,14 @@ func (rl *RateLimiter) Allow(ip string) bool {
 	return true
 }
 
-// Reset сбрасывает счётчик для IP (после успешного входа)
+// Reset clears the counter for an IP after a successful login.
 func (rl *RateLimiter) Reset(ip string) {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 	delete(rl.attempts, ip)
 }
 
-// RateLimitMiddleware применяет rate limiting
+// RateLimitMiddleware applies the rate limiter to a route.
 func RateLimitMiddleware(limiter *RateLimiter, trustProxy bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

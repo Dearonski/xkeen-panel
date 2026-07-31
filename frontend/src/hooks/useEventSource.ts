@@ -6,7 +6,9 @@ import type { Status } from '@/types'
 export function useEventSource() {
     const qc = useQueryClient()
     const esRef = useRef<EventSource | null>(null)
-    const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+    const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+        undefined,
+    )
     const attempt = useRef(0)
 
     useEffect(() => {
@@ -31,10 +33,8 @@ export function useEventSource() {
                 qc.setQueryData<string[]>(['logs'], old => {
                     const logs = old ?? []
                     const updated = [...logs, line]
-                    // Хранить максимум 200 строк на клиенте
-                    return updated.length > 200
-                        ? updated.slice(-200)
-                        : updated
+                    // Keep at most 200 lines on the client
+                    return updated.length > 200 ? updated.slice(-200) : updated
                 })
             })
 
@@ -45,7 +45,7 @@ export function useEventSource() {
                 )
             })
 
-            // Автообновление подписки на сервере — обновить данные в UI
+            // The server refreshed the subscription — pull the new data into the UI
             es.addEventListener('subscription', () => {
                 qc.invalidateQueries({ queryKey: ['subscription'] })
                 qc.invalidateQueries({ queryKey: ['servers'] })
@@ -55,15 +55,15 @@ export function useEventSource() {
                 es.close()
                 esRef.current = null
 
-                // Проверить — может токен протух
+                // The token may have expired
                 if (!getToken()) {
                     clearToken()
                     window.location.href = '/login'
                     return
                 }
 
-                // Экспоненциальный backoff: 3с → 6с → 12с ... cap 30с,
-                // чтобы долгий обрыв не долбил роутер
+                // Exponential backoff: 3s -> 6s -> 12s, capped at 30s, so a long
+                // outage does not hammer the router
                 const delay = Math.min(30000, 3000 * 2 ** attempt.current)
                 attempt.current += 1
                 reconnectTimer.current = setTimeout(connect, delay)

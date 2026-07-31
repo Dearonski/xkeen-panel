@@ -49,17 +49,17 @@ func (s *Server) Handler() http.Handler {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	// Rate limiter для login — 5 попыток в минуту
+	// Login rate limiter: 5 attempts per minute
 	rateLimiter := api.NewRateLimiter(5, time.Minute)
 
-	// Хендлеры
+	// Handlers
 	authHandler := api.NewAuthHandler(s.userManager, rateLimiter, s.config)
 	webAuthnHandler := api.NewWebAuthnHandler(s.userManager, rateLimiter, s.config)
 	handlers := api.NewHandlers(s.config, s.subscription, s.watchdog, s.detector, s.pool)
 
-	// API-маршруты
+	// API routes
 	r.Route("/api", func(r chi.Router) {
-		// Аутентификация — без JWT
+		// Authentication, no JWT required
 		r.Route("/auth", func(r chi.Router) {
 			r.Get("/status", authHandler.HandleAuthStatus)
 			r.Post("/setup", authHandler.HandleSetup)
@@ -69,7 +69,7 @@ func (s *Server) Handler() http.Handler {
 			r.With(api.RateLimitMiddleware(rateLimiter, s.config.TrustProxyHeaders)).Post("/login/passkey/finish", webAuthnHandler.HandleLoginFinish)
 		})
 
-		// SSE-маршруты — с JWT, без таймаута
+		// SSE routes: JWT required, no timeout
 		r.Group(func(r chi.Router) {
 			r.Use(api.AuthMiddleware(s.userManager))
 
@@ -77,7 +77,7 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/servers/check", sse.HandleStreamLatency(s.subscription, s.config.ProbeConcurrency, time.Duration(s.config.ProbeTimeoutMs)*time.Millisecond))
 		})
 
-		// Защищённые REST-маршруты — с JWT и таймаутом
+		// Protected REST routes: JWT and a timeout
 		r.Group(func(r chi.Router) {
 			r.Use(api.AuthMiddleware(s.userManager))
 			r.Use(middleware.Timeout(30 * time.Second))
@@ -93,7 +93,7 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/servers/check", handlers.HandleCheckServers)
 			r.Post("/servers/country", handlers.HandleSetCountry)
 
-			// Управление passkey
+			// Passkey management
 			r.Post("/account/passkey/register/begin", webAuthnHandler.HandleRegisterBegin)
 			r.Post("/account/passkey/register/finish", webAuthnHandler.HandleRegisterFinish)
 			r.Get("/account/passkey", webAuthnHandler.HandlePasskeyList)
@@ -136,25 +136,25 @@ func (s *Server) Handler() http.Handler {
 		})
 	})
 
-	// SPA fallback — отдаём фронтенд
+	// SPA fallback: serve the frontend
 	if s.frontendFS != nil {
 		fileServer := http.FileServer(http.FS(s.frontendFS))
 		r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
-			// Попробовать отдать статический файл
+			// Try to serve a static file
 			path := r.URL.Path
 			if path == "/" {
 				path = "/index.html"
 			}
 
-			// Проверить существование файла
-			f, err := s.frontendFS.Open(path[1:]) // убрать /
+			// Check whether the file exists
+			f, err := s.frontendFS.Open(path[1:]) // drop the leading /
 			if err == nil {
 				f.Close()
 				fileServer.ServeHTTP(w, r)
 				return
 			}
 
-			// SPA fallback — отдать index.html
+			// SPA fallback: serve index.html
 			r.URL.Path = "/"
 			fileServer.ServeHTTP(w, r)
 		})

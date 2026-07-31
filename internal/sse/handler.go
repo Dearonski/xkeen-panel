@@ -10,12 +10,12 @@ import (
 	"xkeen-panel/internal/xkeen"
 )
 
-// StatusProvider — интерфейс для получения текущего статуса (watchdog)
+// StatusProvider supplies the current status (implemented by the watchdog).
 type StatusProvider interface {
 	GetStatus() models.Status
 }
 
-// HandleEvents — SSE-поток статуса, логов и рестарт-событий
+// HandleEvents streams status, logs and restart events over SSE.
 func HandleEvents(bus *EventBus, sp StatusProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		flusher, ok := w.(http.Flusher)
@@ -36,14 +36,14 @@ func HandleEvents(bus *EventBus, sp StatusProvider) http.HandlerFunc {
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("X-Accel-Buffering", "no")
 
-		// Отправить текущий статус при подключении
+		// Send the current status on connect
 		initial := Event{Type: "status", Data: sp.GetStatus()}
 		if data, err := FormatSSE(initial); err == nil {
 			w.Write(data)
 			flusher.Flush()
 		}
 
-		// Стримить события из EventBus
+		// Stream events from the EventBus
 		for {
 			select {
 			case <-r.Context().Done():
@@ -66,7 +66,7 @@ func HandleEvents(bus *EventBus, sp StatusProvider) http.HandlerFunc {
 	}
 }
 
-// HandleStreamLatency — SSE-поток проверки латенси серверов
+// HandleStreamLatency streams per-server latency results over SSE.
 func HandleStreamLatency(sub *xkeen.SubscriptionManager, concurrency int, timeout time.Duration) http.HandlerFunc {
 	if concurrency <= 0 {
 		concurrency = 20
@@ -113,7 +113,7 @@ func HandleStreamLatency(sub *xkeen.SubscriptionManager, concurrency int, timeou
 			}(s)
 		}
 
-		// Закрыть канал после завершения всех горутин
+		// Close the channel once every goroutine is done
 		go func() {
 			wg.Wait()
 			close(results)
@@ -137,7 +137,7 @@ func HandleStreamLatency(sub *xkeen.SubscriptionManager, concurrency int, timeou
 			flusher.Flush()
 		}
 
-		// Сохранить измеренные задержки в подписку
+		// Persist the measured latencies into the subscription
 		for i := range servers {
 			if lat, ok := latByID[servers[i].ID]; ok {
 				servers[i].Latency = lat
@@ -145,14 +145,14 @@ func HandleStreamLatency(sub *xkeen.SubscriptionManager, concurrency int, timeou
 		}
 		sub.UpdateLatencies(servers)
 
-		// Финальное событие
+		// Final event
 		done := Event{Type: "done", Data: map[string]bool{"complete": true}}
 		if data, err := FormatSSE(done); err == nil {
 			w.Write(data)
 			flusher.Flush()
 		}
 
-		// Дать браузеру время прочитать финальное событие
+		// Give the browser a moment to read the final event
 		select {
 		case <-r.Context().Done():
 		case <-time.After(500 * time.Millisecond):

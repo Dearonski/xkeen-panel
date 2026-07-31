@@ -51,14 +51,14 @@ func (h *AuthHandler) HandleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Генерация TOTP
+	// Generate the TOTP secret
 	secret, qrBase64, err := auth.GenerateTOTP(req.Username)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "ошибка генерации TOTP"})
 		return
 	}
 
-	// Создание pending-пользователя
+	// Create the pending account
 	if err := h.userManager.CreatePendingUser(req.Username, req.Password, secret); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "ошибка создания пользователя"})
 		return
@@ -131,15 +131,15 @@ func (h *AuthHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Сброс rate limiter после успешного входа
+	// Reset the rate limiter after a successful login
 	h.rateLimiter.Reset(strings.TrimSpace(ip))
 
 	writeJSON(w, http.StatusOK, map[string]string{"token": token})
 }
 
-// clientIP возвращает идентификатор клиента для rate-limit. X-Forwarded-For
-// учитывается ТОЛЬКО при trust_proxy_headers (его легко подделать на прямом
-// сокете), и берётся правый хоп — добавленный доверенным прокси.
+// clientIP identifies a client for rate limiting. X-Forwarded-For is honoured
+// ONLY with trust_proxy_headers — it is trivially spoofed on the direct socket —
+// and the rightmost hop is taken, the one the trusted proxy appended.
 func clientIP(r *http.Request, trustProxy bool) string {
 	if trustProxy {
 		if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {

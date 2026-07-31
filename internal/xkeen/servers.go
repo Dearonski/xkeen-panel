@@ -13,18 +13,18 @@ import (
 	"xkeen-panel/internal/models"
 )
 
-// ParseSubscription парсит содержимое подписки (base64 или plain text)
+// ParseSubscription parses subscription content, base64 or plain text.
 func ParseSubscription(content string) ([]models.Server, error) {
-	// Попробовать декодировать base64
+	// Try base64
 	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(content))
 	if err != nil {
-		// Попробовать URL-safe base64
+		// Try URL-safe base64
 		decoded, err = base64.URLEncoding.DecodeString(strings.TrimSpace(content))
 		if err != nil {
-			// Попробовать base64 без паддинга
+			// Try unpadded base64
 			decoded, err = base64.RawStdEncoding.DecodeString(strings.TrimSpace(content))
 			if err != nil {
-				// Возможно, уже plain text
+				// Probably plain text already
 				decoded = []byte(content)
 			}
 		}
@@ -72,7 +72,7 @@ func ParseSubscription(content string) ([]models.Server, error) {
 	return servers, nil
 }
 
-// parseVLESS парсит vless://uuid@host:port?params#name
+// parseVLESS parses vless://uuid@host:port?params#name
 func parseVLESS(uri string) (*models.Server, error) {
 	u, err := url.Parse(uri)
 	if err != nil {
@@ -99,11 +99,11 @@ func parseVLESS(uri string) (*models.Server, error) {
 	}, nil
 }
 
-// parseVMess парсит vmess://base64json
+// parseVMess parses vmess://base64json
 func parseVMess(uri string) (*models.Server, error) {
 	encoded := strings.TrimPrefix(uri, "vmess://")
 
-	// Декодирование base64
+	// Decode base64
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		decoded, err = base64.RawStdEncoding.DecodeString(encoded)
@@ -141,7 +141,7 @@ func parseVMess(uri string) (*models.Server, error) {
 	}, nil
 }
 
-// parseTrojan парсит trojan://password@host:port?params#name
+// parseTrojan parses trojan://password@host:port?params#name
 func parseTrojan(uri string) (*models.Server, error) {
 	u, err := url.Parse(uri)
 	if err != nil {
@@ -168,12 +168,12 @@ func parseTrojan(uri string) (*models.Server, error) {
 	}, nil
 }
 
-// parseShadowsocks парсит ss://base64@host:port#name или ss://base64#name
+// parseShadowsocks parses ss://base64@host:port#name or ss://base64#name
 func parseShadowsocks(uri string) (*models.Server, error) {
-	// Убрать префикс
+	// Strip the scheme
 	raw := strings.TrimPrefix(uri, "ss://")
 
-	// Извлечь имя из фрагмента
+	// Take the name from the fragment
 	name := ""
 	if idx := strings.LastIndex(raw, "#"); idx != -1 {
 		name = raw[idx+1:]
@@ -184,7 +184,7 @@ func parseShadowsocks(uri string) (*models.Server, error) {
 	var host string
 	var port int
 
-	// Формат 1: base64@host:port
+	// Form 1: base64@host:port
 	if atIdx := strings.LastIndex(raw, "@"); atIdx != -1 {
 		hostPort := raw[atIdx+1:]
 		h, p, err := net.SplitHostPort(hostPort)
@@ -193,7 +193,7 @@ func parseShadowsocks(uri string) (*models.Server, error) {
 			port, _ = strconv.Atoi(p)
 		}
 	} else {
-		// Формат 2: всё в base64
+		// Form 2: everything in base64
 		decoded, err := base64.URLEncoding.DecodeString(raw)
 		if err != nil {
 			decoded, err = base64.RawURLEncoding.DecodeString(raw)
@@ -236,7 +236,7 @@ func parseShadowsocks(uri string) (*models.Server, error) {
 	}, nil
 }
 
-// CheckLatency проверяет задержку TCP-соединения к серверу
+// CheckLatency measures the TCP connect time to a server.
 func CheckLatency(address string, port int, timeout time.Duration) int {
 	start := time.Now()
 	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%d", address, port), timeout)
@@ -247,8 +247,8 @@ func CheckLatency(address string, port int, timeout time.Duration) int {
 	return int(time.Since(start).Milliseconds())
 }
 
-// CheckAllLatencies проверяет задержку всех серверов параллельно с ограничением
-// числа одновременных соединений — без лимита большая подписка кладёт роутер.
+// CheckAllLatencies probes every server concurrently with a cap on simultaneous
+// connections — uncapped, a large subscription takes the router down.
 func CheckAllLatencies(servers []models.Server, timeout time.Duration, concurrency int) []models.Server {
 	if concurrency <= 0 {
 		concurrency = 20

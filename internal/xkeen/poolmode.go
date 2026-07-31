@@ -79,8 +79,9 @@ func EnablePool(rt Runtime, outboundsPath string, servers []models.Server, opts 
 		doc.path:      doc.config,
 	}
 
-	// Пул без api живёт своей жизнью: ноду выбирает leastPing, а закрепить её
-	// вручную нельзя. Чужой блок не трогаем — его мог поставить `xkeen -sb on`.
+	// Without the api block a pool still works — leastPing picks the node — but
+	// nothing can pin one by hand. A foreign block is left alone: `xkeen -sb on`
+	// may have installed it.
 	apiPath := filepath.Join(rt.XrayConfDir, apiConfigFile)
 	apiCreated := false
 	if opts.APIAddr != "" {
@@ -169,8 +170,8 @@ func DisablePool(rt Runtime, outboundsPath string, server *models.Server, state 
 		return err
 	}
 
-	// Убираем только тот api-блок, который создали сами: чужой мог поставить
-	// `xkeen -sb on`, и его удаление сломало бы балансировку по скорости
+	// Remove only the api block the panel created: a foreign one may come from
+	// `xkeen -sb on`, and deleting it would break the speed balancer
 	if state.APIFile != "" {
 		if err := os.Remove(state.APIFile); err != nil && !os.IsNotExist(err) {
 			log.Printf("[POOL] Не удалось удалить %s: %v", state.APIFile, err)

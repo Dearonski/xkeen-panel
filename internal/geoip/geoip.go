@@ -1,6 +1,7 @@
-// Package geoip читает geoip.dat формата Xray/V2Ray (protobuf) и отвечает на
-// вопрос «находится ли IP в одной из избегаемых стран». Чтобы не держать в памяти
-// всю базу (~18 МБ) на роутере, загружаются CIDR только нужных стран.
+// Package geoip reads the Xray/V2Ray geoip.dat (protobuf) and answers whether an
+// IP sits in one of the avoided countries. Only the CIDRs of the countries in
+// question are loaded — keeping the whole ~18 MB database in a router's memory
+// is not an option.
 package geoip
 
 import (
@@ -44,8 +45,8 @@ const (
 	resolveNegTTL = time.Minute
 )
 
-// FindDat возвращает путь к существующему geoip.dat: сначала заданный в конфиге,
-// затем стандартные кандидаты. "" если ничего не найдено.
+// FindDat returns the path of an existing geoip.dat: the configured one first,
+// then the standard candidates. Empty when nothing is found.
 func FindDat(configured string) string {
 	candidates := []string{configured}
 	if configured != "" {
@@ -70,7 +71,7 @@ func FindDat(configured string) string {
 	return ""
 }
 
-// Load парсит geoip.dat и сохраняет диапазоны только для стран из avoidCodes.
+// Load parses geoip.dat, keeping ranges only for the countries in avoidCodes.
 func Load(path string, avoidCodes []string) (*Matcher, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -102,7 +103,7 @@ func Load(path string, avoidCodes []string) (*Matcher, error) {
 	return m, nil
 }
 
-// countryCodeOf достаёт country_code (поле 1) из сообщения GeoIP, не парся CIDR.
+// countryCodeOf reads country_code (field 1) out of a GeoIP message without parsing its CIDRs.
 func countryCodeOf(geoip []byte) string {
 	var cc string
 	walk(geoip, func(field, wire int, _ uint64, ld []byte) bool {
@@ -115,7 +116,7 @@ func countryCodeOf(geoip []byte) string {
 	return cc
 }
 
-// addEntry парсит CIDR (поле 2) сообщения GeoIP и добавляет диапазоны.
+// addEntry parses the CIDRs (field 2) of a GeoIP message and stores the ranges.
 func (m *Matcher) addEntry(geoip []byte, cc string) {
 	walk(geoip, func(field, wire int, _ uint64, ld []byte) bool {
 		if field == 2 && wire == 2 {
@@ -125,7 +126,7 @@ func (m *Matcher) addEntry(geoip []byte, cc string) {
 	})
 }
 
-// addCIDR парсит CIDR{ ip=1 bytes, prefix=2 varint }.
+// addCIDR parses CIDR{ ip=1 bytes, prefix=2 varint }.
 func (m *Matcher) addCIDR(cidr []byte, cc string) {
 	var ip []byte
 	var prefix uint64
@@ -165,7 +166,7 @@ func (m *Matcher) addCIDR(cidr []byte, cc string) {
 	}
 }
 
-// Match возвращает код избегаемой страны, если IP в неё попадает.
+// Match returns the avoided country code an IP falls into, if any.
 func (m *Matcher) Match(ip net.IP) (string, bool) {
 	if m == nil {
 		return "", false
@@ -189,9 +190,9 @@ func (m *Matcher) Match(ip net.IP) (string, bool) {
 	return "", false
 }
 
-// Inspect резолвит адрес (домен или IP) и проверяет на избегаемые страны.
-// resolved=false означает «не удалось определить» (DNS не отвечает) — повод
-// откатиться на эвристику по имени.
+// Inspect resolves an address (host or IP) and checks it against the avoided
+// countries. resolved=false means it could not be determined (DNS is not
+// answering) — a reason to fall back to the name heuristic.
 func (m *Matcher) Inspect(address string) (avoidCC string, resolved bool) {
 	if m == nil {
 		return "", false
@@ -217,7 +218,7 @@ func (m *Matcher) resolve(address string) []net.IP {
 	if e, ok := m.resolveCache[address]; ok {
 		ttl := resolveTTL
 		if len(e.ips) == 0 {
-			ttl = resolveNegTTL // негатив кэшируем коротко, чтобы не залипнуть на час
+			ttl = resolveNegTTL // cache negatives briefly so a blip does not stick for an hour
 		}
 		if time.Since(e.at) < ttl {
 			m.resolveMu.Unlock()
@@ -226,8 +227,8 @@ func (m *Matcher) resolve(address string) []net.IP {
 	}
 	m.resolveMu.Unlock()
 
-	// Таймаут обязателен: resolve вызывается из watchdog-горутины во время
-	// фейловера, а он часто срабатывает именно когда сеть/DNS недоступны.
+	// The timeout is mandatory: resolve runs from the watchdog goroutine during
+	// failover, which usually fires exactly when the network or DNS is down.
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	addrs, _ := net.DefaultResolver.LookupIPAddr(ctx, address)
@@ -242,8 +243,8 @@ func (m *Matcher) resolve(address string) []net.IP {
 	return ips
 }
 
-// walk проходит protobuf-сообщение, вызывая fn для каждого поля. Для wire 0
-// передаётся распарсенный varint, для wire 2 — байты значения.
+// walk iterates a protobuf message, calling fn per field: a parsed varint for
+// wire type 0, the raw bytes for wire type 2.
 func walk(b []byte, fn func(field, wire int, varint uint64, ld []byte) bool) bool {
 	i := 0
 	for i < len(b) {
@@ -271,8 +272,8 @@ func walk(b []byte, fn func(field, wire int, varint uint64, ld []byte) bool) boo
 				return false
 			}
 			i += n
-			// Сравниваем как uint64 до конвертации в int — иначе i+int(l) может
-			// переполнить знаковый int (особенно 32-битный на mipsle) и уйти в минус.
+			// Compare as uint64 before converting to int: i+int(l) can overflow a
+			// signed int (notably the 32-bit one on mipsle) and go negative.
 			if l > uint64(len(b)-i) {
 				return false
 			}

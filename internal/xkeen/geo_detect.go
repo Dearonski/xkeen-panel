@@ -5,9 +5,9 @@ import (
 	"unicode"
 )
 
-// detectCountry определяет ISO-код страны по имени сервера: сначала флаг-эмодзи,
-// затем словарь ключевых слов. Возвращает "" если распознать не удалось.
-// Это вспомогательный/косметический сигнал — основной источник страны GeoIP.
+// detectCountry derives an ISO country code from a server name: flag emoji
+// first, then a keyword table. Returns "" when nothing matches. This is a
+// cosmetic fallback — GeoIP is the authoritative source.
 func detectCountry(name string) string {
 	if c := countryFromFlag(name); c != "" {
 		return c
@@ -32,7 +32,7 @@ func detectCountry(name string) string {
 	return ""
 }
 
-// countryFromFlag извлекает ISO-код из флаг-эмодзи (пара regional indicator символов).
+// countryFromFlag reads the ISO code out of a flag emoji (a regional indicator pair).
 func countryFromFlag(s string) string {
 	runes := []rune(s)
 	for i := 0; i+1 < len(runes); i++ {
@@ -44,7 +44,7 @@ func countryFromFlag(s string) string {
 	return ""
 }
 
-// countryTokens — точное совпадение по токену (безопасно для коротких кодов вроде "ru").
+// countryTokens matches whole tokens — safe for short codes like "ru".
 var countryTokens = map[string]string{
 	"ru": "RU", "rus": "RU", "russia": "RU", "россия": "RU", "ру": "RU", "рф": "RU",
 	"moscow": "RU", "москва": "RU", "msk": "RU", "spb": "RU", "питер": "RU",
@@ -77,7 +77,7 @@ var countryTokens = map[string]string{
 	"cz": "CZ", "czech": "CZ", "чехия": "CZ", "prague": "CZ", "прага": "CZ",
 }
 
-// countrySubstrings — для имён без разделителей (substring), только однозначные длинные слова.
+// countrySubstrings matches inside names without separators; only long, unambiguous words.
 var countrySubstrings = []struct{ word, code string }{
 	{"russia", "RU"}, {"россия", "RU"}, {"moscow", "RU"}, {"москва", "RU"},
 	{"belarus", "BY"}, {"беларус", "BY"}, {"minsk", "BY"},

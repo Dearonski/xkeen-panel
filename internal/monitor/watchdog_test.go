@@ -178,7 +178,7 @@ func TestRotateLog(t *testing.T) {
 	}
 }
 
-// --- protobuf-энкодер для сборки geoip.dat формата Xray ---
+// --- protobuf encoder for building an Xray-format geoip.dat ---
 
 func uvarint(v uint64) []byte {
 	b := make([]byte, binary.MaxVarintLen64)

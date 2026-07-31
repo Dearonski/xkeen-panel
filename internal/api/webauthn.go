@@ -48,9 +48,10 @@ func NewWebAuthnHandler(um *auth.UserManager, rl *RateLimiter, cfg *models.Confi
 	}
 }
 
-// webAuthn собирает экземпляр WebAuthn. RPID/origins берутся из конфига; вывод из
-// заголовков запроса допускается только при доверенном прокси (иначе серверный
-// origin-пин был бы подконтролен клиенту на прямом :3000 сокете).
+// webAuthn builds the WebAuthn instance. RPID/origins come from the config;
+// deriving them from request headers is allowed only behind a trusted proxy —
+// otherwise the server-side origin pin would be client-controlled on the direct
+// :3000 socket.
 func (h *WebAuthnHandler) webAuthn(r *http.Request) (*webauthn.WebAuthn, error) {
 	rpID := strings.TrimSpace(h.cfg.WebAuthnRPID)
 	origins := h.cfg.WebAuthnOrigins
@@ -76,8 +77,8 @@ func (h *WebAuthnHandler) webAuthn(r *http.Request) (*webauthn.WebAuthn, error) 
 		rpID = host
 	}
 
-	// Без явного списка origins разрешаем домен на стандартных HTTPS-портах
-	// KeenDNS, чтобы passkey работал и локально (443), и через облако (:8443 и т.п.).
+	// With no explicit origin list, allow the domain on the standard KeenDNS
+	// HTTPS ports so a passkey works locally (443) and through the cloud (:8443).
 	if len(origins) == 0 {
 		origins = keenDNSOrigins(rpID)
 	}
@@ -92,9 +93,9 @@ func (h *WebAuthnHandler) webAuthn(r *http.Request) (*webauthn.WebAuthn, error) 
 	})
 }
 
-// keenDNSOrigins разрешает RP-домен на портах, которые использует облако KeenDNS
-// для HTTPS (443 без порта + остальные из набора). RP ID без порта общий, поэтому
-// один passkey валиден на всех этих origin.
+// keenDNSOrigins expands the RP domain over the ports KeenDNS uses for HTTPS
+// (443 without a port, plus the rest of the set). The RP ID stays portless, so
+// one passkey stays valid across all of them.
 func keenDNSOrigins(host string) []string {
 	origins := []string{"https://" + host}
 	for _, p := range []int{5083, 5443, 8083, 8443, 65083} {
@@ -111,8 +112,8 @@ func genCeremonyID() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// putSession сохраняет SessionData под случайным id, подметая просроченное и
-// ограничивая размер карты (защита от спама begin).
+// putSession stores SessionData under a random id, sweeping expired entries and
+// capping the map — otherwise repeated begin calls would grow it without bound.
 func (h *WebAuthnHandler) putSession(id string, data *webauthn.SessionData) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -175,9 +176,9 @@ func cookieValue(r *http.Request, name string) string {
 	return ""
 }
 
-// HandleRegisterBegin — POST /api/account/passkey/register/begin (защищённый)
+// HandleRegisterBegin — POST /api/account/passkey/register/begin (authenticated)
 func (h *WebAuthnHandler) HandleRegisterBegin(w http.ResponseWriter, r *http.Request) {
-	// Поддерживается ровно один passkey — чтобы добавить новый, сначала удалить текущий
+	// Exactly one passkey is supported: remove the current one before adding another
 	if h.userManager.HasWebAuthnCredentials() {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "passkey уже добавлен — сначала удалите текущий"})
 		return
@@ -215,7 +216,7 @@ func (h *WebAuthnHandler) HandleRegisterBegin(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, options)
 }
 
-// HandleRegisterFinish — POST /api/account/passkey/register/finish (защищённый)
+// HandleRegisterFinish — POST /api/account/passkey/register/finish (authenticated)
 func (h *WebAuthnHandler) HandleRegisterFinish(w http.ResponseWriter, r *http.Request) {
 	wa, err := h.webAuthn(r)
 	if err != nil {
@@ -249,7 +250,7 @@ func (h *WebAuthnHandler) HandleRegisterFinish(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
-// HandleLoginBegin — POST /api/auth/login/passkey/begin (без JWT, rate-limited)
+// HandleLoginBegin — POST /api/auth/login/passkey/begin (no JWT, rate-limited)
 func (h *WebAuthnHandler) HandleLoginBegin(w http.ResponseWriter, r *http.Request) {
 	if !h.userManager.HasWebAuthnCredentials() {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "passkey не настроен"})
@@ -283,7 +284,7 @@ func (h *WebAuthnHandler) HandleLoginBegin(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, options)
 }
 
-// HandleLoginFinish — POST /api/auth/login/passkey/finish (без JWT, rate-limited)
+// HandleLoginFinish — POST /api/auth/login/passkey/finish (no JWT, rate-limited)
 func (h *WebAuthnHandler) HandleLoginFinish(w http.ResponseWriter, r *http.Request) {
 	wa, err := h.webAuthn(r)
 	if err != nil {
@@ -309,7 +310,7 @@ func (h *WebAuthnHandler) HandleLoginFinish(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Клонированный аутентификатор: счётчик подписей не вырос — сигнал компрометации
+	// Cloned authenticator: the signature counter did not advance, a compromise signal
 	if cred.Authenticator.CloneWarning {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "passkey отклонён (clone warning)"})
 		return
@@ -328,14 +329,14 @@ func (h *WebAuthnHandler) HandleLoginFinish(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]string{"token": token})
 }
 
-// HandlePasskeyList — GET /api/account/passkey (защищённый)
+// HandlePasskeyList — GET /api/account/passkey (authenticated)
 func (h *WebAuthnHandler) HandlePasskeyList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"passkeys": h.userManager.WebAuthnCredentialIDs(),
 	})
 }
 
-// HandlePasskeyDelete — DELETE /api/account/passkey (защищённый)
+// HandlePasskeyDelete — DELETE /api/account/passkey (authenticated)
 func (h *WebAuthnHandler) HandlePasskeyDelete(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ID string `json:"id"`

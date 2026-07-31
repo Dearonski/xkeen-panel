@@ -26,19 +26,19 @@ func main() {
 	configPath := flag.String("config", "config.yaml", "путь к конфигурационному файлу")
 	flag.Parse()
 
-	// Чтение конфигурации
+	// Load the configuration
 	cfg, err := loadConfig(*configPath)
 	if err != nil {
 		log.Fatalf("Ошибка загрузки конфига: %v", err)
 	}
 
-	// Инициализация менеджера пользователей
+	// User manager
 	userManager := auth.NewUserManager(cfg.DataDir)
 	if err := userManager.Load(); err != nil {
 		log.Fatalf("Ошибка загрузки пользователя: %v", err)
 	}
 
-	// Инициализация менеджера подписок
+	// Subscription manager
 	subManager := xkeen.NewSubscriptionManager(cfg.DataDir)
 	if err := subManager.Load(); err != nil {
 		log.Printf("Предупреждение: ошибка загрузки подписки: %v", err)
@@ -54,19 +54,19 @@ func main() {
 		log.Printf("XKeen %s (поколение %d), ядро %s, режим %s", rt.Version, rt.Generation, rt.Core, rt.Mode)
 	}
 
-	// Состояние пула: тег, под который написаны правила маршрутизации, нужен,
-	// чтобы корректно вернуться к одиночному outbound
+	// Pool state: the tag the routing rules were written against is what makes a
+	// correct return to a single outbound possible
 	poolStore := xkeen.NewPoolStore(cfg.DataDir)
 	if err := poolStore.Load(); err != nil {
 		log.Printf("Предупреждение: не удалось загрузить состояние пула: %v", err)
 	}
 
-	// Инициализация watchdog и SSE
+	// Watchdog and SSE
 	watchdog := monitor.NewWatchdog(cfg, subManager, detector)
 	eventBus := sse.NewEventBus()
 	watchdog.SetEventBus(eventBus)
 
-	// GeoIP — используем geoip.dat, который уже стоит для Xray
+	// GeoIP reuses the geoip.dat already installed for Xray
 	if geoPath := geoip.FindDat(cfg.GeoIPPath); geoPath == "" {
 		log.Printf("GeoIP: geoip.dat не найден (%s) — гео-фильтр по IP отключён, используется определение по имени", cfg.GeoIPPath)
 	} else if matcher, err := geoip.Load(geoPath, cfg.AutoSwitchAvoidCountries); err != nil {
@@ -76,13 +76,13 @@ func main() {
 		log.Printf("GeoIP: загружен %s (избегаемые страны: %v)", geoPath, cfg.AutoSwitchAvoidCountries)
 	}
 
-	// Автостарт watchdog для unattended-режима
+	// Autostart the watchdog for unattended operation
 	if cfg.WatchdogAutoStart && len(subManager.GetServers()) > 0 {
 		watchdog.SetActive(true)
 		log.Printf("Watchdog включён автоматически (watchdog_auto_start)")
 	}
 
-	// Публикация событий рестарта через SSE
+	// Publish restart events over SSE
 	xkeen.OnRestartStateChange = func(restarting bool) {
 		eventBus.Publish(sse.Event{
 			Type: "restart",
@@ -94,19 +94,19 @@ func main() {
 		})
 	}
 
-	// Контекст для graceful shutdown
+	// Context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Запуск watchdog в горутине
+	// Run the watchdog
 	go watchdog.Start(ctx)
 
-	// Периодическое автообновление подписки
+	// Periodic subscription refresh
 	if cfg.SubscriptionRefreshInterval > 0 {
 		go runSubscriptionRefresh(ctx, cfg, subManager, watchdog, detector, eventBus)
 	}
 
-	// Подготовка фронтенда
+	// Frontend assets
 	var frontendFS fs.FS
 	distFS, err := fs.Sub(frontendDist, "frontend/dist")
 	if err != nil {
@@ -115,7 +115,7 @@ func main() {
 		frontendFS = distFS
 	}
 
-	// HTTP-сервер
+	// HTTP server
 	srv := server.New(cfg, userManager, subManager, watchdog, detector, poolStore, eventBus, frontendFS)
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Port),
@@ -147,9 +147,9 @@ func main() {
 	log.Println("Сервер остановлен")
 }
 
-// runSubscriptionRefresh периодически обновляет подписку. Xray перезапускается
-// только если активный сервер реально заменился (исчез из подписки) — иначе
-// обновление не должно рвать соединение.
+// runSubscriptionRefresh refreshes the subscription on a timer. The core is
+// restarted only when the active server was actually replaced (it vanished from
+// the subscription) — a refresh must not drop a working connection.
 func runSubscriptionRefresh(ctx context.Context, cfg *models.Config, sm *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, bus *sse.EventBus) {
 	interval := time.Duration(cfg.SubscriptionRefreshInterval) * time.Second
 	ticker := time.NewTicker(interval)
@@ -188,9 +188,9 @@ func runSubscriptionRefresh(ctx context.Context, cfg *models.Config, sm *xkeen.S
 				newURI = active.RawURI
 			}
 
-			// Активный сервер сменился (старый исчез из подписки). Не перезапускаемся
-			// вслепую на servers[0] — он может оказаться в избегаемой стране; отдаём
-			// выбор гео-фильтру watchdog.
+			// The active server changed because the old one left the subscription.
+			// Do not blindly restart onto servers[0] — it may sit in an avoided
+			// country; let the watchdog's geo filter choose.
 			if active != nil && newURI != prevURI {
 				if target := wd.AllowedActiveOrBest(); target != nil {
 					rt := det.Runtime()
@@ -250,4 +250,3 @@ func loadConfig(path string) (*models.Config, error) {
 
 	return cfg, nil
 }
-

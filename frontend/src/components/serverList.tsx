@@ -34,7 +34,7 @@ export function ServerList({
     const visible = sorted.slice(0, visibleCount)
     const hasMore = visibleCount < sorted.length
 
-    // Бесконечный скролл: подгружаем следующую страницу, когда sentinel виден
+    // Infinite scroll: load the next page once the sentinel comes into view
     useEffect(() => {
         if (!hasMore) return
         const el = sentinelRef.current

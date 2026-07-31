@@ -26,9 +26,9 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
 
     const resp = await fetch(url, { ...options, headers })
 
-    // Только для аутентифицированных запросов 401 = протухшая сессия. Эндпоинты
-    // входа (токена может ещё не быть, либо он устаревший на /login) исключаем —
-    // их 401 это неверные креды/passkey, ошибку должна показать форма.
+    // A 401 means an expired session only for authenticated requests. Login
+    // endpoints are excluded — there may be no token yet, or a stale one on
+    // /login — and their 401 is bad credentials, which the form must show.
     const isLogin = url.startsWith('/api/auth/login')
     if (resp.status === 401 && token && !isLogin) {
         clearToken()

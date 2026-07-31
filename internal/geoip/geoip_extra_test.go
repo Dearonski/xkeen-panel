@@ -42,7 +42,7 @@ func TestMultipleAvoidCountries(t *testing.T) {
 	if cc, ok := m.Match(net.ParseIP("178.124.9.9")); !ok || cc != "BY" {
 		t.Errorf("Match(BY ip) = (%q, %v), want (BY, true)", cc, ok)
 	}
-	// NL присутствует в файле, но не в avoid-списке — не должно матчиться.
+	// NL is in the file but not in the avoid list, so it must not match.
 	if cc, ok := m.Match(net.ParseIP("5.6.7.7")); ok || cc != "" {
 		t.Errorf("Match(NL ip) = (%q, %v), want (\"\", false)", cc, ok)
 	}
@@ -59,12 +59,12 @@ func TestFindDatVariants(t *testing.T) {
 		t.Errorf("FindDat(existing) = %q, want %q", got, v2fly)
 	}
 
-	// configured-файла нет, но рядом лежит geoip_v2fly.dat — возвращаем его.
+	// The configured file is missing but geoip_v2fly.dat sits next to it.
 	if got := FindDat(filepath.Join(dir, "nope.dat")); got != v2fly {
 		t.Errorf("FindDat(sibling fallback) = %q, want %q", got, v2fly)
 	}
 
-	// Не паникует и возвращает строку (обычно "" при отсутствии стандартных путей).
+	// Must not panic; returns a string, usually "" when no standard path exists.
 	_ = FindDat("")
 }
 

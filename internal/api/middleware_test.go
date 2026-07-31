@@ -21,7 +21,7 @@ func TestRateLimiterAllow(t *testing.T) {
 		t.Fatal("4-я попытка должна быть отклонена")
 	}
 
-	// Другой IP считается независимо
+	// A different IP is counted independently
 	if !rl.Allow("2.2.2.2") {
 		t.Fatal("первая попытка с другого IP должна быть разрешена")
 	}
@@ -57,15 +57,15 @@ func TestClientIP(t *testing.T) {
 	req.RemoteAddr = "9.9.9.9:111"
 	req.Header.Set("X-Forwarded-For", "1.1.1.1, 2.2.2.2")
 
-	// Не доверяем прокси → RemoteAddr, подделанный XFF игнорируется
+	// Proxy not trusted: RemoteAddr wins and a spoofed XFF is ignored
 	if got := clientIP(req, false); got != "9.9.9.9:111" {
 		t.Errorf("trustProxy=false: got %q, want RemoteAddr", got)
 	}
-	// Доверяем прокси → правый хоп (добавленный прокси)
+	// Proxy trusted: the rightmost hop, the one the proxy appended
 	if got := clientIP(req, true); got != "2.2.2.2" {
 		t.Errorf("trustProxy=true: got %q, want rightmost XFF", got)
 	}
-	// Доверяем, но XFF нет → RemoteAddr
+	// Trusted but no XFF: RemoteAddr
 	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
 	req2.RemoteAddr = "9.9.9.9:111"
 	if got := clientIP(req2, true); got != "9.9.9.9:111" {

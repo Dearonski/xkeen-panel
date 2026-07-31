@@ -8,7 +8,7 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 )
 
-// webAuthnUser реализует интерфейс webauthn.User поверх снимка данных пользователя.
+// webAuthnUser implements webauthn.User over a snapshot of the account.
 type webAuthnUser struct {
 	id          []byte
 	name        string
@@ -20,8 +20,8 @@ func (u *webAuthnUser) WebAuthnName() string                       { return u.na
 func (u *webAuthnUser) WebAuthnDisplayName() string                { return u.name }
 func (u *webAuthnUser) WebAuthnCredentials() []webauthn.Credential { return u.credentials }
 
-// WebAuthnUser возвращает пользователя для церемоний WebAuthn, при необходимости
-// генерируя стабильный user handle.
+// WebAuthnUser returns the user for WebAuthn ceremonies, generating a stable
+// user handle if there is none yet.
 func (um *UserManager) WebAuthnUser() (webauthn.User, error) {
 	um.mu.Lock()
 	defer um.mu.Unlock()
@@ -47,7 +47,7 @@ func (um *UserManager) WebAuthnUser() (webauthn.User, error) {
 	return &webAuthnUser{id: um.user.WebAuthnID, name: um.user.Username, credentials: creds}, nil
 }
 
-// AddWebAuthnCredential добавляет новый passkey.
+// AddWebAuthnCredential stores a new passkey.
 func (um *UserManager) AddWebAuthnCredential(cred *webauthn.Credential) error {
 	um.mu.Lock()
 	defer um.mu.Unlock()
@@ -59,7 +59,7 @@ func (um *UserManager) AddWebAuthnCredential(cred *webauthn.Credential) error {
 	return um.persistLocked()
 }
 
-// UpdateWebAuthnCredential обновляет существующий passkey (например, счётчик подписей).
+// UpdateWebAuthnCredential updates a stored passkey, e.g. its signature counter.
 func (um *UserManager) UpdateWebAuthnCredential(cred *webauthn.Credential) {
 	um.mu.Lock()
 	defer um.mu.Unlock()
@@ -76,7 +76,7 @@ func (um *UserManager) UpdateWebAuthnCredential(cred *webauthn.Credential) {
 	}
 }
 
-// RemoveWebAuthnCredential удаляет passkey по base64url его ID.
+// RemoveWebAuthnCredential deletes a passkey by the base64url of its ID.
 func (um *UserManager) RemoveWebAuthnCredential(idB64 string) error {
 	um.mu.Lock()
 	defer um.mu.Unlock()
@@ -94,14 +94,14 @@ func (um *UserManager) RemoveWebAuthnCredential(idB64 string) error {
 	return um.persistLocked()
 }
 
-// HasWebAuthnCredentials сообщает, зарегистрирован ли хотя бы один passkey.
+// HasWebAuthnCredentials reports whether any passkey is registered.
 func (um *UserManager) HasWebAuthnCredentials() bool {
 	um.mu.RLock()
 	defer um.mu.RUnlock()
 	return um.user != nil && len(um.user.Credentials) > 0
 }
 
-// WebAuthnCredentialIDs возвращает base64url-идентификаторы зарегистрированных passkey.
+// WebAuthnCredentialIDs returns the base64url ids of the registered passkeys.
 func (um *UserManager) WebAuthnCredentialIDs() []string {
 	um.mu.RLock()
 	defer um.mu.RUnlock()

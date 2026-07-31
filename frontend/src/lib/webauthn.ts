@@ -23,12 +23,10 @@ export function passkeySupported(): boolean {
     )
 }
 
-// registerPasskey проводит церемонию регистрации passkey (требует авторизации).
+// registerPasskey runs the passkey registration ceremony (requires a session).
 export async function registerPasskey(): Promise<void> {
     /* eslint-disable @typescript-eslint/no-explicit-any */
-    const opts: any = await api.post<any>(
-        '/api/account/passkey/register/begin',
-    )
+    const opts: any = await api.post<any>('/api/account/passkey/register/begin')
     const pk = opts.publicKey
     pk.challenge = b64urlToBuf(pk.challenge)
     pk.user.id = b64urlToBuf(pk.user.id)
@@ -54,7 +52,7 @@ export async function registerPasskey(): Promise<void> {
     })
 }
 
-// getPasskeyToken проводит церемонию входа и возвращает JWT.
+// getPasskeyToken runs the login ceremony and returns the JWT.
 export async function getPasskeyToken(): Promise<string> {
     const opts: any = await api.post<any>('/api/auth/login/passkey/begin')
     const pk = opts.publicKey
@@ -79,9 +77,7 @@ export async function getPasskeyToken(): Promise<string> {
                 authenticatorData: bufToB64url(resp.authenticatorData),
                 clientDataJSON: bufToB64url(resp.clientDataJSON),
                 signature: bufToB64url(resp.signature),
-                userHandle: resp.userHandle
-                    ? bufToB64url(resp.userHandle)
-                    : '',
+                userHandle: resp.userHandle ? bufToB64url(resp.userHandle) : '',
             },
             clientExtensionResults: cred.getClientExtensionResults(),
         },

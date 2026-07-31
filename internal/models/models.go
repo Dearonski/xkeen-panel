@@ -6,7 +6,7 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 )
 
-// Config — конфигурация приложения (config.yaml)
+// Config is the application configuration (config.yaml).
 type Config struct {
 	Port          int    `yaml:"port"`
 	DataDir       string `yaml:"data_dir"`
@@ -26,7 +26,7 @@ type Config struct {
 	XkeenJSON     string `yaml:"xkeen_json"`
 	XrayAPIAddr   string `yaml:"xray_api_addr"`
 
-	// Автопилот: проверка задержек и переключение серверов
+	// Autopilot: latency probing and server switching
 	ProbeTimeoutMs     int  `yaml:"probe_timeout_ms"`
 	ProbeConcurrency   int  `yaml:"probe_concurrency"`
 	LatencyAutoSwitch  bool `yaml:"latency_auto_switch"`
@@ -35,26 +35,26 @@ type Config struct {
 	BlacklistTTLSec    int  `yaml:"blacklist_ttl_sec"`
 	WatchdogAutoStart  bool `yaml:"watchdog_auto_start"`
 
-	// Автообновление подписки
+	// Automatic subscription refresh
 	SubscriptionRefreshInterval int `yaml:"subscription_refresh_interval"`
 
-	// Гео-избегание при автопереключении
+	// Countries to avoid when switching automatically
 	GeoIPPath                string   `yaml:"geoip_path"`
 	AutoSwitchAvoidCountries []string `yaml:"auto_switch_avoid_countries"`
 
-	// Доверять заголовкам прокси (X-Forwarded-For/Host/Proto). Включать ТОЛЬКО
-	// если панель за доверенным прокси, который их перезаписывает — иначе их
-	// можно подделать на прямом сокете :3000.
+	// Trust proxy headers (X-Forwarded-For/Host/Proto). Enable ONLY behind a
+	// trusted proxy that rewrites them — otherwise they can be spoofed on the
+	// direct :3000 socket.
 	TrustProxyHeaders bool `yaml:"trust_proxy_headers"`
 
-	// WebAuthn (passkey). RPID/origins лучше задать явно. Вывод из заголовков
-	// запроса допускается только при trust_proxy_headers: true.
+	// WebAuthn (passkey). Prefer pinning RPID/origins explicitly; deriving them
+	// from request headers is allowed only with trust_proxy_headers: true.
 	WebAuthnRPID    string   `yaml:"webauthn_rp_id"`
 	WebAuthnRPName  string   `yaml:"webauthn_rp_name"`
 	WebAuthnOrigins []string `yaml:"webauthn_origins"`
 }
 
-// User — пользователь (data/user.json)
+// User is the panel account (data/user.json).
 type User struct {
 	Username     string    `json:"username"`
 	PasswordHash string    `json:"password_hash"`
@@ -66,7 +66,7 @@ type User struct {
 	Credentials []webauthn.Credential `json:"credentials,omitempty"`
 }
 
-// Server — сервер из подписки
+// Server is one entry of the subscription.
 type Server struct {
 	ID              int       `json:"id"`
 	Name            string    `json:"name"`
@@ -81,7 +81,7 @@ type Server struct {
 	CountryOverride string    `json:"country_override,omitempty"`
 }
 
-// SubscriptionData — подписка (data/subscription.json)
+// SubscriptionData is the stored subscription (data/subscription.json).
 type SubscriptionData struct {
 	URL         string    `json:"url"`
 	LastUpdated time.Time `json:"last_updated"`
@@ -89,7 +89,7 @@ type SubscriptionData struct {
 	ActiveID    int       `json:"active_id"`
 }
 
-// Status — статус соединения
+// Status is the connection status reported to the UI.
 type Status struct {
 	Connected      bool      `json:"connected"`
 	XrayRunning    bool      `json:"xray_running"`
@@ -109,36 +109,36 @@ type Status struct {
 	Generation   int    `json:"generation"`
 }
 
-// SetupRequest — запрос на первичную регистрацию
+// SetupRequest starts the initial account setup.
 type SetupRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
-// SetupConfirmRequest — подтверждение TOTP
+// SetupConfirmRequest confirms the TOTP enrolment.
 type SetupConfirmRequest struct {
 	Code string `json:"code"`
 }
 
-// LoginRequest — запрос на вход
+// LoginRequest is a login attempt.
 type LoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 	TOTPCode string `json:"totp_code"`
 }
 
-// SelectServerRequest — выбор сервера
+// SelectServerRequest selects a server.
 type SelectServerRequest struct {
 	ID int `json:"id"`
 }
 
-// SetCountryRequest — ручной override страны сервера
+// SetCountryRequest overrides a server's country by hand.
 type SetCountryRequest struct {
 	ID      int    `json:"id"`
 	Country string `json:"country"`
 }
 
-// UpdateSubscriptionRequest — обновление подписки
+// UpdateSubscriptionRequest sets the subscription URL.
 type UpdateSubscriptionRequest struct {
 	URL string `json:"url"`
 }

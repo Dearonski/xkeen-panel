@@ -30,7 +30,7 @@ func subWith(t *testing.T, servers []models.Server, activeID int) *xkeen.Subscri
 func TestAllowedActiveOrBest(t *testing.T) {
 	cfg := &models.Config{AutoSwitchAvoidCountries: []string{"RU", "BY"}}
 
-	// Активный разрешён — возвращается он сам, без подбора и без сети.
+	// The active server is allowed: it is returned as is, with no probing.
 	subOk := subWith(t, []models.Server{
 		{ID: 0, Name: "nl", Country: "NL", Protocol: "vless", RawURI: "u-nl", Active: true},
 	}, 0)
@@ -38,7 +38,7 @@ func TestAllowedActiveOrBest(t *testing.T) {
 		t.Errorf("ожидался активный NL, got %+v", got)
 	}
 
-	// Активный в избегаемой стране, разрешённой замены нет — fallback на текущий.
+	// Active sits in an avoided country and there is no allowed replacement.
 	subRu := subWith(t, []models.Server{
 		{ID: 0, Name: "ru", Country: "RU", Protocol: "vless", RawURI: "u-ru", Active: true},
 	}, 0)

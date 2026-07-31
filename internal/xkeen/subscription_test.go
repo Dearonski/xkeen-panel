@@ -19,7 +19,7 @@ func body(uris ...string) string {
 	return strings.Join(uris, "\n")
 }
 
-// subServer отдаёт изменяемое тело подписки; setter меняет его между запросами.
+// subServer serves a mutable subscription body; the setter changes it between requests.
 func subServer(t *testing.T, initial string) (*httptest.Server, func(string)) {
 	t.Helper()
 	var mu sync.Mutex

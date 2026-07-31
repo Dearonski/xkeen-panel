@@ -25,7 +25,7 @@ export function DashboardPage() {
     const { logout } = useAuth()
     const qc = useQueryClient()
 
-    // SSE — статус, логи, рестарт-события в реальном времени
+    // SSE: status, logs and restart events in real time
     useEventSource()
     const { check: checkLatency, checking: checkingLatency } =
         useStreamLatency()

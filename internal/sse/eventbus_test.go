@@ -68,7 +68,7 @@ func TestUnsubscribeClosesChannel(t *testing.T) {
 		t.Fatal("чтение из закрытого канала зависло")
 	}
 
-	// Повторный Subscribe подтверждает, что клиент удалён и слот свободен.
+	// Subscribing again proves the client was removed and its slot freed.
 	for i := 0; i < maxClients; i++ {
 		if bus.Subscribe() == nil {
 			t.Fatalf("слот #%d занят, хотя клиент был удалён", i+1)

@@ -9,7 +9,7 @@ import (
 
 const tokenExpiry = 24 * time.Hour
 
-// GenerateToken создаёт JWT-токен
+// GenerateToken issues a JWT.
 func GenerateToken(username, secret string) (string, error) {
 	claims := jwt.MapClaims{
 		"sub": username,
@@ -21,7 +21,7 @@ func GenerateToken(username, secret string) (string, error) {
 	return token.SignedString([]byte(secret))
 }
 
-// ValidateToken проверяет JWT-токен и возвращает username
+// ValidateToken verifies a JWT and returns its username.
 func ValidateToken(tokenString, secret string) (string, error) {
 	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {

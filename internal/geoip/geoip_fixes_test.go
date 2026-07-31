@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// Регресс: битая длина length-delimited поля не должна валить парсер паникой.
+// Regression: a corrupt length-delimited field must not panic the parser.
 func TestWalkOverflowNoPanic(t *testing.T) {
 	// field 1, wire 2, length varint = 0x7FFFFFFFFFFFFFFF (max int64)
 	bad := []byte{0x0A, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F}

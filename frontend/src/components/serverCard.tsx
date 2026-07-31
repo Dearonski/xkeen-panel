@@ -46,7 +46,7 @@ export function ServerCard({
     )
 
     const country = server.country_override || server.country
-    // Имя сервера часто уже содержит флаг-эмодзи — не дублируем своим.
+    // Subscription names often already start with a flag emoji — do not add a second one.
     const nameHasFlag = /\p{Regional_Indicator}\p{Regional_Indicator}/u.test(
         server.name,
     )

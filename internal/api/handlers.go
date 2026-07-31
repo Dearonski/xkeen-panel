@@ -110,13 +110,13 @@ func (h *Handlers) HandleSelectServer(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[SELECT] Сервер: %s (%s:%d), RawURI len=%d", server.Name, server.Address, server.Port, len(server.RawURI))
 
-	// Ручной выбор снимает сервер с чёрного списка автопереключения
+	// A manual pick clears the server from the failover blacklist
 	h.watchdog.ClearBlacklist(server.RawURI)
 
 	rt := h.detector.Runtime()
 
-	// У Mihomo нет outbound'ов Xray: панель приводит список proxies к подписке,
-	// а конкретную ноду выбирает proxy-group самого ядра
+	// Mihomo has no Xray outbounds: the panel brings the proxy list in line with
+	// the subscription, and the core's own proxy-group picks the node
 	if rt.Core == xkeen.CoreMihomo {
 		if err := h.syncMihomo(rt); err != nil {
 			log.Printf("[SELECT] Ошибка конфига Mihomo: %v", err)
@@ -140,8 +140,8 @@ func (h *Handlers) HandleSelectServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// В режиме пула ноду выбирает балансировщик, а ручной выбор — это override
-	// через api ядра: мгновенно и без рестарта
+	// In pool mode the balancer picks the node, so a manual choice is an override
+	// through the core API: instant, no restart
 	if top := h.detector.Topology(); top.Mode == xkeen.TopologyPool {
 		if err := h.pinPoolNode(rt, top, req.ID); err != nil {
 			log.Printf("[SELECT] Ошибка закрепления ноды: %v", err)
@@ -158,8 +158,8 @@ func (h *Handlers) HandleSelectServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Обновить конфиг ядра и проверить его до рестарта — битый конфиг иначе
-	// оставит XKeen незапускаемым
+	// Write the core config and validate it before restarting — a broken config
+	// would otherwise leave XKeen unable to start
 	if err := xkeen.ApplyServer(rt, h.config.OutboundsFile, server); err != nil {
 		log.Printf("[SELECT] Ошибка применения конфига: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -182,8 +182,8 @@ func (h *Handlers) HandleSelectServer(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// pinPoolNode закрепляет ноду пула через `xray api bo`. Позиция сервера в
-// подписке совпадает с номером ноды: пул генерируется из того же списка.
+// pinPoolNode pins a pool node through `xray api bo`. A server's position in the
+// subscription matches its node number — the pool is built from the same list.
 func (h *Handlers) pinPoolNode(rt xkeen.Runtime, top xkeen.Topology, serverID int) error {
 	if serverID < 0 || serverID >= len(top.PoolTags) {
 		return fmt.Errorf("нода для сервера %d не найдена в пуле — обновите пул из подписки", serverID)
@@ -194,7 +194,7 @@ func (h *Handlers) pinPoolNode(rt xkeen.Runtime, top xkeen.Topology, serverID in
 		return fmt.Errorf("%w. Закрепление ноды требует блок api в конфиге Xray — его добавляет `xkeen -sb on`", err)
 	}
 
-	// Override живёт только в памяти ядра — сохраняем, чтобы вернуть после рестарта
+	// The override lives only in the core's memory — store it to reapply after a restart
 	if err := h.pool.SetPinned(tag); err != nil {
 		log.Printf("[SELECT] Не удалось сохранить закреплённую ноду: %v", err)
 	}
@@ -202,8 +202,9 @@ func (h *Handlers) pinPoolNode(rt xkeen.Runtime, top xkeen.Topology, serverID in
 	return nil
 }
 
-// syncMihomo приводит proxies в config.yaml к подписке и проверяет результат
-// парсером самого ядра (`xkeen -mtest`), откатывая файл при ошибке.
+// syncMihomo brings the proxies in config.yaml in line with the subscription and
+// validates the result with the core's own parser (`xkeen -mtest`), rolling the
+// file back on failure.
 func (h *Handlers) syncMihomo(rt xkeen.Runtime) error {
 	cfg, err := mihomo.Read(rt.MihomoConf)
 	if err != nil {
@@ -268,7 +269,7 @@ func (h *Handlers) HandleCheckServers(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HandleSetCountry — POST /api/servers/country (ручной override страны)
+// HandleSetCountry — POST /api/servers/country (manual country override)
 func (h *Handlers) HandleSetCountry(w http.ResponseWriter, r *http.Request) {
 	var req models.SetCountryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -341,8 +342,8 @@ func (h *Handlers) HandleStop(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) HandleSelfTest(w http.ResponseWriter, r *http.Request) {
 	rt := h.detector.Runtime()
 
-	// Валидатор ядра логирует по строке на каждый прочитанный файл конфига,
-	// а вердикт пишет в конце — в UI отдаём хвост, а не весь лог
+	// The core's validator logs a line per config file it reads and prints the
+	// verdict last, so the UI gets the tail rather than the whole log
 	output, err := xkeen.TestConfig(rt.Dispatcher, rt.Core)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -376,7 +377,7 @@ func (h *Handlers) HandlePoolStatus(w http.ResponseWriter, r *http.Request) {
 		"core":         rt.Core,
 	}
 
-	// Текущая нода известна только через api ядра; его наличие не гарантировано
+	// The current node is only knowable through the core API, which may be absent
 	if top.Mode == xkeen.TopologyPool {
 		if target, err := xkeen.CurrentBalancerTarget(rt, h.config.XrayAPIAddr, top.BalancerTag); err == nil {
 			resp["current_tag"] = target
@@ -389,8 +390,8 @@ func (h *Handlers) HandlePoolStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// HandlePoolEnable — POST /api/pool/enable. Собирает пул из подписки и
-// переводит правила маршрутизации на балансировщик.
+// HandlePoolEnable — POST /api/pool/enable. Builds a pool from the subscription
+// and moves the routing rules onto the balancer.
 func (h *Handlers) HandlePoolEnable(w http.ResponseWriter, r *http.Request) {
 	servers := h.subscription.GetServers()
 	if len(servers) == 0 {
@@ -423,8 +424,8 @@ func (h *Handlers) HandlePoolEnable(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HandlePoolDisable — POST /api/pool/disable. Возвращает конфиг к одному
-// outbound с активным сервером.
+// HandlePoolDisable — POST /api/pool/disable. Returns the config to a single
+// outbound carrying the active server.
 func (h *Handlers) HandlePoolDisable(w http.ResponseWriter, r *http.Request) {
 	server := h.subscription.GetActiveServer()
 	if server == nil {
@@ -452,7 +453,7 @@ func (h *Handlers) HandlePoolDisable(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "restarting": true})
 }
 
-// HandlePoolSync — POST /api/pool/sync. Приводит состав пула к подписке.
+// HandlePoolSync — POST /api/pool/sync. Brings pool membership in line with the subscription.
 func (h *Handlers) HandlePoolSync(w http.ResponseWriter, r *http.Request) {
 	rt := h.detector.Runtime()
 	state := h.pool.Get()
@@ -475,7 +476,7 @@ func (h *Handlers) HandlePoolSync(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "restarting": true})
 }
 
-// HandleGetSettings — GET /api/xkeen/settings (содержимое xkeen.json)
+// HandleGetSettings — GET /api/xkeen/settings (contents of xkeen.json)
 func (h *Handlers) HandleGetSettings(w http.ResponseWriter, r *http.Request) {
 	rt := h.detector.Runtime()
 
@@ -513,7 +514,7 @@ func (h *Handlers) HandleUpdateSettings(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
-// HandleGetList — GET /api/xkeen/lists/{name} (порты и IP-исключения)
+// HandleGetList — GET /api/xkeen/lists/{name} (ports and IP exclusions)
 func (h *Handlers) HandleGetList(w http.ResponseWriter, r *http.Request) {
 	path, kind, err := xkeen.ListPath(h.detector.Runtime(), chi.URLParam(r, "name"))
 	if err != nil {
@@ -560,7 +561,7 @@ func (h *Handlers) HandleUpdateList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Списки читает init-скрипт при старте — без перезапуска правила не изменятся
+	// The init script reads these lists on start — without a restart nothing changes
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success":        true,
 		"restart_needed": true,

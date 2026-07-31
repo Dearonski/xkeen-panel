@@ -32,7 +32,7 @@ type Watchdog struct {
 	logFile      *os.File
 	eventBus     *sse.EventBus
 	geoip        *geoip.Matcher
-	blacklist    map[string]time.Time // ключ — RawURI, устойчив к переиндексации
+	blacklist    map[string]time.Time // keyed by RawURI, which survives reindexing
 }
 
 func NewWatchdog(cfg *models.Config, sub *xkeen.SubscriptionManager, det *xkeen.Detector) *Watchdog {
@@ -40,33 +40,33 @@ func NewWatchdog(cfg *models.Config, sub *xkeen.SubscriptionManager, det *xkeen.
 		config:       cfg,
 		subscription: sub,
 		detector:     det,
-		active:       false, // По умолчанию выключен — включается вручную из UI
+		active:       false, // off by default, switched on from the UI
 		startTime:    time.Now(),
 		lastLatency:  -1,
 		blacklist:    make(map[string]time.Time),
 	}
 }
 
-// SetEventBus устанавливает шину событий для SSE-уведомлений
+// SetEventBus wires the SSE event bus.
 func (w *Watchdog) SetEventBus(bus *sse.EventBus) {
 	w.eventBus = bus
 }
 
-// SetGeoIP устанавливает GeoIP-матчер для гео-фильтрации при автопереключении.
+// SetGeoIP wires the matcher used to geo-filter automatic switching.
 func (w *Watchdog) SetGeoIP(m *geoip.Matcher) {
 	w.geoip = m
 }
 
-// publishStatus отправляет текущий статус в SSE
+// publishStatus pushes the current status over SSE.
 func (w *Watchdog) publishStatus() {
 	if w.eventBus != nil {
 		w.eventBus.Publish(sse.Event{Type: "status", Data: w.GetStatus()})
 	}
 }
 
-// Start запускает watchdog в горутине
+// Start runs the watchdog loop until ctx is cancelled.
 func (w *Watchdog) Start(ctx context.Context) {
-	// Открыть лог-файл
+	// Open the log file
 	if w.config.LogFile != "" {
 		rotateLog(w.config.LogFile, 1<<20, 256<<10)
 		f, err := os.OpenFile(w.config.LogFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
@@ -87,7 +87,7 @@ func (w *Watchdog) Start(ctx context.Context) {
 
 	w.writeLog("Watchdog запущен (интервал: %s)", interval)
 
-	// Первая проверка сразу
+	// Check once immediately
 	w.check()
 
 	for {
@@ -113,7 +113,7 @@ func (w *Watchdog) Start(ctx context.Context) {
 func (w *Watchdog) check() {
 	start := time.Now()
 
-	// Прямой HTTP-запрос — tproxy прозрачно проксирует трафик
+	// A plain HTTP request: tproxy routes it transparently
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 	}
@@ -146,7 +146,7 @@ func (w *Watchdog) check() {
 	w.lastLatency = latency
 	w.failCount = 0
 
-	// Проактивное переключение: соединение живо, но пинг стабильно высокий
+	// Proactive switch: the link is up but latency stays high
 	proactive := false
 	if w.config.LatencyAutoSwitch && w.config.LatencyThresholdMs > 0 && latency > w.config.LatencyThresholdMs {
 		w.latencyHigh++
@@ -168,16 +168,16 @@ func (w *Watchdog) check() {
 }
 
 func (w *Watchdog) handleFailover(reason string) {
-	// У Mihomo переключение делает proxy-group (url-test/fallback) внутри ядра.
-	// Переписывать конфиг здесь нечего: список proxies синхронизируется при
-	// обновлении подписки, а рестарт только оборвал бы соединения.
+	// On Mihomo the proxy-group (url-test/fallback) switches inside the core.
+	// There is nothing to rewrite here: the proxy list is synced when the
+	// subscription updates, and a restart would only drop connections.
 	if rt := w.detector.Runtime(); rt.Core == xkeen.CoreMihomo {
 		w.writeLog("[MIHOMO] %s — переключение выполняет proxy-group ядра, конфиг не трогаем", reason)
 		return
 	}
 
-	// В режиме пула ноду выбирает балансировщик ядра (leastPing + observatory),
-	// и делает это без рестарта. Задача watchdog здесь — состав пула, а не выбор.
+	// In pool mode the core's balancer (leastPing + observatory) picks the node
+	// without a restart. The watchdog owns pool membership, not the choice.
 	if top := w.detector.Topology(); top.Mode == xkeen.TopologyPool {
 		w.handlePoolFailover(reason, top)
 		return
@@ -185,14 +185,15 @@ func (w *Watchdog) handleFailover(reason string) {
 
 	w.writeLog("[FAILOVER] %s — подбор лучшего сервера...", reason)
 
-	// Запомнить упавший сервер ДО обновления подписки — иначе, если он исчез из
-	// подписки, GetActiveServer вернёт уже servers[0] и в чёрный список уедет не тот.
+	// Remember the failed server BEFORE refreshing: if it disappears from the
+	// subscription, GetActiveServer returns servers[0] and the wrong one would
+	// be blacklisted.
 	prevURI := ""
 	if prev := w.subscription.GetActiveServer(); prev != nil {
 		prevURI = prev.RawURI
 	}
 
-	// Обновить подписку (активный сохраняется по RawURI)
+	// Refresh the subscription (the active server is matched by RawURI)
 	if _, err := w.subscription.Refresh(); err != nil {
 		w.writeLog("[WARN] Не удалось обновить подписку: %v", err)
 	}
@@ -203,7 +204,7 @@ func (w *Watchdog) handleFailover(reason string) {
 		return
 	}
 
-	// Исключить прежний сервер на время TTL, чтобы не метаться по кругу
+	// Hold the failed server out for the TTL so failover does not loop
 	w.blacklistServer(prevURI)
 
 	w.writeLog("[FAILOVER] Выбран сервер: %s (%s:%d, %dms)", server.Name, server.Address, server.Port, server.Latency)
@@ -227,9 +228,9 @@ func (w *Watchdog) handleFailover(reason string) {
 	w.writeLog("[FAILOVER] Перезапуск выполнен, ожидание следующей проверки")
 }
 
-// handlePoolFailover обновляет подписку и приводит состав пула в соответствие с
-// ней. Перезапуск — только если пул реально разошёлся с подпиской: рестарт рвёт
-// соединения, а переключение между живыми нодами балансировщик делает сам.
+// handlePoolFailover refreshes the subscription and brings pool membership in
+// line with it. It restarts only when the pool has actually drifted: a restart
+// drops connections, and switching between live nodes is the balancer's job.
 func (w *Watchdog) handlePoolFailover(reason string, top xkeen.Topology) {
 	w.writeLog("[POOL] %s — выбор ноды за балансировщиком %q, проверяю состав пула", reason, top.BalancerTag)
 
@@ -274,8 +275,8 @@ func (w *Watchdog) handlePoolFailover(reason string, top xkeen.Topology) {
 	w.writeLog("[POOL] Пул приведён к подписке (%d нод), ядро перезапущено", len(servers))
 }
 
-// selectBest подбирает живой сервер с минимальным пингом, избегая текущего,
-// серверов из чёрного списка, не-VLESS и серверов в заблокированных странах.
+// selectBest picks the lowest-latency live server, skipping the current one,
+// blacklisted ones, non-VLESS entries and servers in avoided countries.
 func (w *Watchdog) selectBest() (*models.Server, error) {
 	data := w.subscription.GetData()
 	if len(data.Servers) == 0 {
@@ -326,14 +327,15 @@ func (w *Watchdog) selectBest() (*models.Server, error) {
 		return nil, fmt.Errorf("ни один разрешённый сервер не ответил")
 	}
 
-	// По RawURI, а не по индексу: между снимком и активацией мог пройти Refresh
+	// By RawURI, not index: a Refresh may have run between snapshot and activation
 	return w.subscription.SetActiveByRawURI(checked[best].RawURI)
 }
 
-// AllowedActiveOrBest возвращает сервер, чей outbound нужно применить после
-// автообновления подписки. Если активный оказался в избегаемой стране (подписка
-// могла заменить его на servers[0] из RU/BY) — подбирает разрешённую замену.
-// Если замены нет — оставляет текущий (связность важнее), но это логируется.
+// AllowedActiveOrBest returns the server whose outbound to apply after an
+// automatic subscription refresh. If the active one ended up in an avoided
+// country (the refresh may have replaced it with an RU/BY servers[0]), it picks
+// an allowed replacement. With no replacement it keeps the current one —
+// connectivity wins — and logs that.
 func (w *Watchdog) AllowedActiveOrBest() *models.Server {
 	active := w.subscription.GetActiveServer()
 	if active == nil {
@@ -352,10 +354,11 @@ func (w *Watchdog) AllowedActiveOrBest() *models.Server {
 	return best
 }
 
-// isServerAllowed решает, можно ли авто-переключиться на сервер. GeoIP — основной
-// сигнал (доказывает «не в заблокированной стране»), имя — запасной.
+// isServerAllowed decides whether automatic switching may use a server. GeoIP is
+// the primary signal (it proves the server is not in a blocked country); the
+// name is the fallback.
 func (w *Watchdog) isServerAllowed(s models.Server) bool {
-	// Ручной override и распознанная по имени страна — если она в списке избегаемых, сразу нет
+	// Manual override or name-derived country: an avoided one is an immediate no
 	effCountry := s.CountryOverride
 	if effCountry == "" {
 		effCountry = s.Country
@@ -364,17 +367,17 @@ func (w *Watchdog) isServerAllowed(s models.Server) bool {
 		return false
 	}
 
-	// GeoIP — авторитетная проверка по реальному IP
+	// GeoIP is the authoritative check, against the real IP
 	if w.geoip != nil {
 		avoidCC, resolved := w.geoip.Inspect(s.Address)
 		if resolved {
-			return avoidCC == "" // резолвится и не в избегаемой стране → разрешён
+			return avoidCC == "" // resolves and is not in an avoided country
 		}
-		// не резолвится → откат на имя ниже
+		// does not resolve, fall through to the name check
 	}
 
-	// Запасной вариант (GeoIP недоступен / не резолвится): строгий режим —
-	// разрешаем только при известной и разрешённой стране по имени
+	// Fallback (no GeoIP, or it did not resolve): strict mode — allow only when
+	// the name yields a known, permitted country
 	return effCountry != ""
 }
 
@@ -415,7 +418,7 @@ func (w *Watchdog) isBlacklisted(uri string) bool {
 	return true
 }
 
-// ClearBlacklist убирает сервер из чёрного списка (например, при ручном выборе).
+// ClearBlacklist drops a server from the blacklist, e.g. on a manual pick.
 func (w *Watchdog) ClearBlacklist(uri string) {
 	if uri == "" {
 		return
@@ -425,8 +428,8 @@ func (w *Watchdog) ClearBlacklist(uri string) {
 	w.mu.Unlock()
 }
 
-// rotateLog усекает лог-файл на старте, если он превысил maxBytes, оставляя
-// последние keepBytes (с начала строки). На роутере лог не должен расти вечно.
+// rotateLog truncates the log on startup once it exceeds maxBytes, keeping the
+// last keepBytes from a line boundary — a router log must not grow forever.
 func rotateLog(path string, maxBytes, keepBytes int64) {
 	st, err := os.Stat(path)
 	if err != nil || st.Size() <= maxBytes {
@@ -453,7 +456,7 @@ func (w *Watchdog) writeLog(format string, args ...interface{}) {
 
 	w.mu.Lock()
 	w.logs = append(w.logs, msg)
-	// Хранить максимум 500 строк в памяти
+	// Keep at most 500 lines in memory
 	if len(w.logs) > 500 {
 		w.logs = w.logs[len(w.logs)-500:]
 	}
@@ -468,7 +471,7 @@ func (w *Watchdog) writeLog(format string, args ...interface{}) {
 	}
 }
 
-// GetStatus возвращает текущий статус
+// GetStatus returns the current status.
 func (w *Watchdog) GetStatus() models.Status {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
@@ -478,8 +481,8 @@ func (w *Watchdog) GetStatus() models.Status {
 	restarting := xkeen.IsRestarting()
 	coreRunning := xkeen.IsRunning(rt.Core)
 
-	// Во время рестарта состояние xray ненадёжно — процесс может быть
-	// ещё жив или уже убит, не показываем "connected" чтобы не вводить в заблуждение
+	// During a restart the core's state is unreliable — the process may still be
+	// alive or already killed — so "connected" is withheld rather than guessed
 	if restarting {
 		coreRunning = false
 	}
@@ -509,7 +512,7 @@ func (w *Watchdog) GetStatus() models.Status {
 		}
 	}
 
-	// Текущий сервер
+	// Current server
 	if server := w.subscription.GetActiveServer(); server != nil {
 		status.CurrentServer = server.Name
 		status.Protocol = server.Protocol
@@ -518,7 +521,7 @@ func (w *Watchdog) GetStatus() models.Status {
 	return status
 }
 
-// GetLogs возвращает последние N строк лога
+// GetLogs returns the last n log lines.
 func (w *Watchdog) GetLogs(n int) []string {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
@@ -527,7 +530,7 @@ func (w *Watchdog) GetLogs(n int) []string {
 		n = len(w.logs)
 	}
 
-	// Читать также из файла если лог в памяти короче
+	// Fall back to the file when the in-memory log is shorter
 	if n > len(w.logs) && w.config.LogFile != "" {
 		return w.readLogFile(n)
 	}
@@ -550,7 +553,7 @@ func (w *Watchdog) readLogFile(n int) []string {
 	return lines[len(lines)-n:]
 }
 
-// SetActive включает/выключает watchdog
+// SetActive turns the watchdog on or off.
 func (w *Watchdog) SetActive(active bool) {
 	w.mu.Lock()
 	w.active = active
@@ -565,7 +568,7 @@ func (w *Watchdog) SetActive(active bool) {
 	w.publishStatus()
 }
 
-// IsActive проверяет, активен ли watchdog
+// IsActive reports whether the watchdog is running.
 func (w *Watchdog) IsActive() bool {
 	w.mu.RLock()
 	defer w.mu.RUnlock()

@@ -47,7 +47,7 @@ func TestSetActiveByRawURI(t *testing.T) {
 	}
 }
 
-// Регресс: GetData не должен отдавать алиас внутреннего массива серверов.
+// Regression: GetData must not hand out an alias of the internal server slice.
 func TestGetDataDeepCopy(t *testing.T) {
 	sm := loadSub(t, []models.Server{
 		{ID: 0, RawURI: "u0", Country: "NL"},

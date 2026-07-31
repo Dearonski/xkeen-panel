@@ -7,17 +7,17 @@ import (
 )
 
 const (
-	maxClients    = 4
+	maxClients     = 4
 	chanBufferSize = 16
 )
 
-// Event — SSE-событие с типом и данными
+// Event is one SSE message: a type and its payload.
 type Event struct {
 	Type string
 	Data interface{}
 }
 
-// EventBus — pub/sub брокер с fan-out по каналам клиентов
+// EventBus is a pub/sub broker fanning out to per-client channels.
 type EventBus struct {
 	mu      sync.RWMutex
 	clients map[chan Event]struct{}
@@ -29,7 +29,7 @@ func NewEventBus() *EventBus {
 	}
 }
 
-// Subscribe регистрирует нового клиента. Возвращает nil если лимит превышен.
+// Subscribe registers a client. Returns nil when the client limit is reached.
 func (b *EventBus) Subscribe() chan Event {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -43,7 +43,7 @@ func (b *EventBus) Subscribe() chan Event {
 	return ch
 }
 
-// Unsubscribe удаляет клиента и закрывает канал
+// Unsubscribe removes a client and closes its channel.
 func (b *EventBus) Unsubscribe(ch chan Event) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -54,7 +54,7 @@ func (b *EventBus) Unsubscribe(ch chan Event) {
 	}
 }
 
-// Publish отправляет событие всем подписчикам (non-blocking)
+// Publish delivers an event to every subscriber without blocking.
 func (b *EventBus) Publish(event Event) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -63,12 +63,12 @@ func (b *EventBus) Publish(event Event) {
 		select {
 		case ch <- event:
 		default:
-			// Медленный клиент — пропускаем, не блокируем продюсера
+			// Slow client: skip it rather than block the producer
 		}
 	}
 }
 
-// FormatSSE сериализует событие в формат SSE
+// FormatSSE renders an event in SSE wire format.
 func FormatSSE(event Event) ([]byte, error) {
 	var dataStr string
 

@@ -14,7 +14,7 @@ const queryClient = new QueryClient({
     },
 })
 
-// Тёмная тема по умолчанию
+// Dark theme by default
 document.documentElement.classList.add('dark')
 
 createRoot(document.getElementById('root')!).render(

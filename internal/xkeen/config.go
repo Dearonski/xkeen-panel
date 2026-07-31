@@ -11,7 +11,7 @@ import (
 	"xkeen-panel/internal/models"
 )
 
-// ReadOutboundsConfig читает файл 04_outbounds.json
+// ReadOutboundsConfig reads 04_outbounds.json.
 func ReadOutboundsConfig(path string) (map[string]interface{}, error) {
 	var config map[string]interface{}
 	if err := ReadJSONC(path, &config); err != nil {
@@ -21,7 +21,7 @@ func ReadOutboundsConfig(path string) (map[string]interface{}, error) {
 	return config, nil
 }
 
-// WriteOutboundsConfig записывает конфиг обратно.
+// WriteOutboundsConfig writes the config back.
 //
 // Backup first, then write through a temp file in the same directory and rename:
 // a half-written config in the directory Xray reads means XKeen cannot start,
@@ -98,8 +98,8 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	return os.Rename(tmpName, path)
 }
 
-// VLESSParams — все параметры из VLESS URI. Экспортирован: генератор конфига
-// Mihomo строит proxies из тех же полей.
+// VLESSParams holds every parameter of a VLESS URI. Exported because the Mihomo
+// config generator builds its proxies from the same fields.
 type VLESSParams struct {
 	UUID        string
 	Address     string
@@ -117,10 +117,10 @@ type VLESSParams struct {
 	Flow        string // xtls-rprx-vision
 	ALPN        string
 	Encryption  string
-	Extra       string // JSON из параметра extra (для xhttp: downloadSettings, xmux и т.д.)
+	Extra       string // JSON from the extra parameter (xhttp: downloadSettings, xmux, …)
 }
 
-// ParseVLESS полностью парсит VLESS URI
+// ParseVLESS parses a VLESS URI in full.
 func ParseVLESS(uri string) (*VLESSParams, error) {
 	u, err := url.Parse(uri)
 	if err != nil {
@@ -158,9 +158,9 @@ func ParseVLESS(uri string) (*VLESSParams, error) {
 	}, nil
 }
 
-// buildOutboundFromURI генерирует ПОЛНЫЙ outbound из VLESS URI.
-// tag — тег из существующего конфига (чтобы совпадал с routing),
-// format — форма записи учётных данных, снятая с существующего конфига.
+// buildOutboundFromURI renders a complete outbound from a VLESS URI. The tag
+// comes from the existing config so routing keeps matching, and the format is
+// whichever credential shape that config already uses.
 func buildOutboundFromURI(p *VLESSParams, tag string, format outboundFormat) map[string]interface{} {
 	settings := buildVLESSSettings(p, format)
 
@@ -250,7 +250,7 @@ func buildOutboundFromURI(p *VLESSParams, tag string, format outboundFormat) map
 		if p.Mode != "" {
 			xs["mode"] = p.Mode
 		}
-		// extra — JSON с downloadSettings, xmux и другими параметрами xhttp
+		// extra carries downloadSettings, xmux and other xhttp parameters as JSON
 		if p.Extra != "" {
 			var extraMap map[string]interface{}
 			if err := json.Unmarshal([]byte(p.Extra), &extraMap); err == nil {
@@ -282,7 +282,7 @@ func buildOutboundFromURI(p *VLESSParams, tag string, format outboundFormat) map
 	return outbound
 }
 
-// UpdateOutbound генерирует полный outbound из VLESS URI и записывает в конфиг
+// UpdateOutbound renders the outbound for server and writes it to the config.
 func UpdateOutbound(outboundsPath string, server *models.Server) error {
 	config, err := ReadOutboundsConfig(outboundsPath)
 	if err != nil {
@@ -294,7 +294,7 @@ func UpdateOutbound(outboundsPath string, server *models.Server) error {
 		return fmt.Errorf("outbounds не найдены в конфиге")
 	}
 
-	// Парсим VLESS URI
+	// Parse the VLESS URI
 	if server.RawURI == "" {
 		return fmt.Errorf("RawURI пуст — невозможно сгенерировать конфиг. Обновите подписку")
 	}
@@ -314,8 +314,8 @@ func UpdateOutbound(outboundsPath string, server *models.Server) error {
 		return fmt.Errorf("в конфиге %d прокси-outbound'ов (пул балансировщика) — переключение по одному не поддерживается", n)
 	}
 
-	// Тег и форма записи берутся из существующего outbound: тег должен совпадать
-	// с routing, а форму (vnext/плоскую) владелец конфига менять не просил.
+	// Tag and shape come from the existing outbound: the tag has to keep matching
+	// routing, and nobody asked to convert the config between vnext and flat.
 	replaceIdx, existing := findProxyOutbound(outbounds)
 	newOutbound := mergeOutbound(existing, buildOutboundFromURI(
 		params,
@@ -331,13 +331,13 @@ func UpdateOutbound(outboundsPath string, server *models.Server) error {
 
 	config["outbounds"] = outbounds
 
-	// Убираем routing из 04_outbounds — он есть в 05_routing.json
+	// Drop a stray routing section — it belongs in 05_routing.json
 	delete(config, "routing")
 
 	return WriteOutboundsConfig(outboundsPath, config)
 }
 
-// GetCurrentOutbound читает текущий адрес/порт из конфига
+// GetCurrentOutbound reads the configured upstream address, port and uuid.
 func GetCurrentOutbound(outboundsPath string) (address string, port int, uuid string, err error) {
 	config, err := ReadOutboundsConfig(outboundsPath)
 	if err != nil {
@@ -349,7 +349,7 @@ func GetCurrentOutbound(outboundsPath string) (address string, port int, uuid st
 		return "", 0, "", fmt.Errorf("outbounds не найдены")
 	}
 
-	// Первый proxy-outbound (не direct/block), в любой из двух форм записи
+	// First proxy outbound (not direct/block), in either credential shape
 	for _, raw := range outbounds {
 		outbound, ok := raw.(map[string]interface{})
 		if !ok || isServiceOutbound(outbound) {
@@ -363,7 +363,7 @@ func GetCurrentOutbound(outboundsPath string) (address string, port int, uuid st
 	return "", 0, "", fmt.Errorf("proxy outbound не найден")
 }
 
-// extractUserInfo извлекает userinfo из URI
+// extractUserInfo pulls the userinfo part out of a URI.
 func extractUserInfo(uri string) string {
 	idx := strings.Index(uri, "://")
 	if idx == -1 {
@@ -377,7 +377,7 @@ func extractUserInfo(uri string) string {
 	return rest[:atIdx]
 }
 
-// extractVMessUUID извлекает UUID из vmess URI (base64 JSON)
+// extractVMessUUID pulls the uuid out of a vmess URI (base64 JSON).
 func extractVMessUUID(uri string) string {
 	encoded := strings.TrimPrefix(uri, "vmess://")
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
@@ -394,7 +394,7 @@ func extractVMessUUID(uri string) string {
 	return id
 }
 
-// extractSSCredentials извлекает method и password из ss URI
+// extractSSCredentials pulls method and password out of an ss URI.
 func extractSSCredentials(uri string) (method, password string) {
 	raw := strings.TrimPrefix(uri, "ss://")
 	if idx := strings.LastIndex(raw, "#"); idx != -1 {

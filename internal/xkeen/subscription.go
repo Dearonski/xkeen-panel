@@ -30,7 +30,7 @@ func (sm *SubscriptionManager) filePath() string {
 	return filepath.Join(sm.dataDir, "subscription.json")
 }
 
-// Load загружает данные подписки из файла
+// Load reads the stored subscription.
 func (sm *SubscriptionManager) Load() error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -46,7 +46,7 @@ func (sm *SubscriptionManager) Load() error {
 	return json.Unmarshal(data, sm.data)
 }
 
-// Save сохраняет данные подписки в файл
+// Save writes the subscription to disk.
 func (sm *SubscriptionManager) Save() error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -63,7 +63,7 @@ func (sm *SubscriptionManager) Save() error {
 	return os.WriteFile(sm.filePath(), data, 0600)
 }
 
-// UpdateURL обновляет URL подписки, скачивает и парсит серверы
+// UpdateURL sets a new subscription URL, then downloads and parses it.
 func (sm *SubscriptionManager) UpdateURL(url string) ([]models.Server, error) {
 	servers, err := sm.downloadAndParse(url)
 	if err != nil {
@@ -78,7 +78,7 @@ func (sm *SubscriptionManager) UpdateURL(url string) ([]models.Server, error) {
 	return servers, sm.Save()
 }
 
-// Refresh перезагружает серверы по текущему URL
+// Refresh reloads the servers from the current URL.
 func (sm *SubscriptionManager) Refresh() ([]models.Server, error) {
 	sm.mu.RLock()
 	url := sm.data.URL
@@ -100,8 +100,9 @@ func (sm *SubscriptionManager) Refresh() ([]models.Server, error) {
 	return servers, sm.Save()
 }
 
-// applyRefreshLocked подменяет список серверов, сохраняя активный сервер по его
-// RawURI (а не по индексу) и перенося ручные override страны. Вызывать под sm.mu.
+// applyRefreshLocked swaps the server list, keeping the active server matched by
+// RawURI rather than index and carrying manual country overrides across. Call
+// with sm.mu held.
 func (sm *SubscriptionManager) applyRefreshLocked(servers []models.Server) {
 	var activeURI string
 	if sm.data.ActiveID >= 0 && sm.data.ActiveID < len(sm.data.Servers) {
@@ -128,7 +129,7 @@ func (sm *SubscriptionManager) applyRefreshLocked(servers []models.Server) {
 	}
 }
 
-// carryOverrides переносит ручные CountryOverride со старого списка на новый по RawURI.
+// carryOverrides moves manual CountryOverride values onto the new list by RawURI.
 func carryOverrides(old, fresh []models.Server) {
 	if len(old) == 0 {
 		return
@@ -146,8 +147,8 @@ func carryOverrides(old, fresh []models.Server) {
 	}
 }
 
-// GetData возвращает копию данных подписки. Slice Servers копируется глубоко —
-// иначе вызывающий читал бы живой массив без блокировки (гонка с SetActive и др.).
+// GetData returns a copy of the subscription. Servers is deep-copied: otherwise
+// the caller would read the live slice unlocked, racing SetActive and friends.
 func (sm *SubscriptionManager) GetData() models.SubscriptionData {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -156,7 +157,7 @@ func (sm *SubscriptionManager) GetData() models.SubscriptionData {
 	return d
 }
 
-// GetServers возвращает список серверов
+// GetServers returns the server list.
 func (sm *SubscriptionManager) GetServers() []models.Server {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -166,8 +167,8 @@ func (sm *SubscriptionManager) GetServers() []models.Server {
 	return result
 }
 
-// UpdateLatencies сохраняет измеренные задержки обратно в подписку по RawURI,
-// чтобы UI показывал пинг сразу и не терял его при обновлении.
+// UpdateLatencies stores measured latencies back into the subscription by RawURI,
+// so the UI shows them at once and does not lose them on refresh.
 func (sm *SubscriptionManager) UpdateLatencies(checked []models.Server) {
 	sm.mu.Lock()
 
@@ -197,8 +198,8 @@ func (sm *SubscriptionManager) UpdateLatencies(checked []models.Server) {
 	}
 }
 
-// SetCountryOverride задаёт ручной override страны сервера (для строгого режима,
-// когда страна не распозналась автоматически).
+// SetCountryOverride sets a server's country by hand — needed in strict mode when
+// detection could not resolve it.
 func (sm *SubscriptionManager) SetCountryOverride(id int, country string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -219,7 +220,7 @@ func (sm *SubscriptionManager) SetCountryOverride(id int, country string) error 
 	return os.WriteFile(sm.filePath(), data, 0600)
 }
 
-// SetActive устанавливает активный сервер по ID
+// SetActive makes the server with the given id active.
 func (sm *SubscriptionManager) SetActive(id int) (*models.Server, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -235,7 +236,7 @@ func (sm *SubscriptionManager) SetActive(id int) (*models.Server, error) {
 
 	server := sm.data.Servers[id]
 
-	// Сохранение в горутине нежелательно — сохраним синхронно
+	// Saving in a goroutine would race the next call — write synchronously
 	data, err := json.MarshalIndent(sm.data, "", "  ")
 	if err != nil {
 		return nil, err
@@ -251,9 +252,9 @@ func (sm *SubscriptionManager) SetActive(id int) (*models.Server, error) {
 	return &server, nil
 }
 
-// SetActiveByRawURI активирует сервер по его стабильному RawURI под одной блокировкой.
-// Безопаснее SetActive(id), когда между снимком и активацией мог пройти Refresh
-// (id-индексы переезжают, RawURI — нет).
+// SetActiveByRawURI activates a server by its stable RawURI under a single lock.
+// Safer than SetActive(id) when a Refresh may have run between snapshot and
+// activation: indices move, RawURI does not.
 func (sm *SubscriptionManager) SetActiveByRawURI(uri string) (*models.Server, error) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -289,7 +290,7 @@ func (sm *SubscriptionManager) SetActiveByRawURI(uri string) (*models.Server, er
 	return &server, nil
 }
 
-// GetActiveServer возвращает текущий активный сервер
+// GetActiveServer returns the active server.
 func (sm *SubscriptionManager) GetActiveServer() *models.Server {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
@@ -307,7 +308,7 @@ func (sm *SubscriptionManager) GetActiveServer() *models.Server {
 	return &s
 }
 
-// SelectNext переключает на следующий сервер
+// SelectNext switches to the next server in the list.
 func (sm *SubscriptionManager) SelectNext() (*models.Server, error) {
 	sm.mu.RLock()
 	count := len(sm.data.Servers)

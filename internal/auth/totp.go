@@ -9,7 +9,7 @@ import (
 	"github.com/pquerna/otp/totp"
 )
 
-// GenerateTOTP создаёт новый TOTP-секрет и QR-код
+// GenerateTOTP creates a new TOTP secret and its QR code.
 func GenerateTOTP(username string) (secret string, qrBase64 string, err error) {
 	key, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      "XKeen Panel",
@@ -19,7 +19,7 @@ func GenerateTOTP(username string) (secret string, qrBase64 string, err error) {
 		return "", "", fmt.Errorf("генерация TOTP: %w", err)
 	}
 
-	// Генерация QR-кода
+	// Render the QR code
 	img, err := key.Image(256, 256)
 	if err != nil {
 		return "", "", fmt.Errorf("генерация QR-изображения: %w", err)
@@ -35,7 +35,7 @@ func GenerateTOTP(username string) (secret string, qrBase64 string, err error) {
 	return key.Secret(), qrBase64, nil
 }
 
-// ValidateTOTP проверяет TOTP-код
+// ValidateTOTP checks a TOTP code.
 func ValidateTOTP(code, secret string) bool {
 	return totp.Validate(code, secret)
 }
