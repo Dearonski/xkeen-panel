@@ -107,15 +107,16 @@ func (h *Handlers) HandleSelectServer(w http.ResponseWriter, r *http.Request) {
 	// Ручной выбор снимает сервер с чёрного списка автопереключения
 	h.watchdog.ClearBlacklist(server.RawURI)
 
-	// Обновить конфиг Xray (04_outbounds.json) — генерирует полный outbound из URI
+	// Обновить конфиг ядра и проверить его до рестарта — битый конфиг иначе
+	// оставит XKeen незапускаемым
 	rt := h.detector.Runtime()
-	if err := xkeen.UpdateOutbound(h.config.OutboundsFile, server); err != nil {
-		log.Printf("[SELECT] Ошибка UpdateOutbound: %v", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "ошибка обновления конфига: " + err.Error()})
+	if err := xkeen.ApplyServer(rt, h.config.OutboundsFile, server); err != nil {
+		log.Printf("[SELECT] Ошибка применения конфига: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
-	log.Printf("[SELECT] Конфиг обновлён, запускаем рестарт...")
+	log.Printf("[SELECT] Конфиг обновлён и проверен, запускаем рестарт...")
 
 	// Restart the core without blocking the response
 	go func() {

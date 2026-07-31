@@ -187,7 +187,7 @@ func runSubscriptionRefresh(ctx context.Context, cfg *models.Config, sm *xkeen.S
 			if active != nil && newURI != prevURI {
 				if target := wd.AllowedActiveOrBest(); target != nil {
 					rt := det.Runtime()
-					if err := xkeen.UpdateOutbound(cfg.OutboundsFile, target); err != nil {
+					if err := xkeen.ApplyServer(rt, cfg.OutboundsFile, target); err != nil {
 						log.Printf("[AUTO-UPDATE] Ошибка конфига: %v", err)
 					} else {
 						xkeen.Restart(rt.Dispatcher)

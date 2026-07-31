@@ -1,0 +1,38 @@
+{
+    "outbounds": [
+        {
+            "tag": "vless-reality",
+            "protocol": "vless",
+            "settings": {
+                "address": "se3.gofizzin.com",
+                "port": 443,
+                "id": "42d20997-dfdf-4c37-8a2a-99023a7e78b5",
+                "encryption": "none",
+                "flow": "xtls-rprx-vision"
+            },
+            "streamSettings": {
+                "network": "raw",
+                "security": "reality",
+                "realitySettings": {
+                    "fingerprint": "chrome",
+                    "serverName": "se3.gofizzin.com",
+                    "publicKey": "nmoHVsghroRQczCeAUcCHTNFashHmrH6DfBEEGZGzl4",
+                    "shortId": "85a8a921740d"
+                }
+            }
+        },
+        {
+            "protocol": "freedom",
+            "tag": "direct"
+        },
+        {
+            "protocol": "blackhole",
+            "settings": {
+                "response": {
+                    "type": "http"
+                }
+            },
+            "tag": "block"
+        }
+    ]
+}

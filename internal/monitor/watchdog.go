@@ -194,8 +194,8 @@ func (w *Watchdog) handleFailover(reason string) {
 	w.writeLog("[FAILOVER] Выбран сервер: %s (%s:%d, %dms)", server.Name, server.Address, server.Port, server.Latency)
 
 	rt := w.detector.Runtime()
-	if err := xkeen.UpdateOutbound(w.config.OutboundsFile, server); err != nil {
-		w.writeLog("[ERROR] Ошибка обновления конфига Xray: %v", err)
+	if err := xkeen.ApplyServer(rt, w.config.OutboundsFile, server); err != nil {
+		w.writeLog("[ERROR] Конфиг не применён: %v", err)
 		return
 	}
 

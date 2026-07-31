@@ -48,7 +48,7 @@ func TestBuildOutboundReality(t *testing.T) {
 		t.Fatalf("parseVLESSURI: %v", err)
 	}
 
-	ob := buildOutboundFromURI(p, "vless-reality")
+	ob := buildOutboundFromURI(p, "vless-reality", formatVNext)
 
 	if ob["protocol"] != "vless" {
 		t.Errorf("protocol = %v, want vless", ob["protocol"])
@@ -78,7 +78,7 @@ func TestBuildOutboundWS(t *testing.T) {
 		t.Fatalf("parseVLESSURI: %v", err)
 	}
 
-	ob := buildOutboundFromURI(p, "vless-ws")
+	ob := buildOutboundFromURI(p, "vless-ws", formatVNext)
 	ss := ob["streamSettings"].(map[string]interface{})
 
 	if ss["network"] != "ws" {
@@ -121,9 +121,18 @@ func TestUpdateOutbound(t *testing.T) {
 	if ob0["tag"] != "vless-reality" {
 		t.Errorf("outbounds[0].tag = %v, want vless-reality", ob0["tag"])
 	}
-	v0 := vnextEntry(t, ob0)
-	if v0["address"] != "1.2.3.4" {
-		t.Errorf("outbounds[0] address = %v, want 1.2.3.4", v0["address"])
+	address, port, uuid, ok := readProxyEndpoint(ob0)
+	if !ok {
+		t.Fatal("readProxyEndpoint: proxy endpoint not found")
+	}
+	if address != "1.2.3.4" {
+		t.Errorf("outbounds[0] address = %v, want 1.2.3.4", address)
+	}
+	if port != 443 {
+		t.Errorf("outbounds[0] port = %d, want 443", port)
+	}
+	if uuid != "11111111-2222-3333-4444-555555555555" {
+		t.Errorf("outbounds[0] uuid = %v, want the URI uuid", uuid)
 	}
 	if _, ok := cfg["routing"]; ok {
 		t.Error("в конфиге не должно быть ключа routing")

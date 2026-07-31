@@ -6,33 +6,96 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"xkeen-panel/internal/models"
 )
 
 // ReadOutboundsConfig читает файл 04_outbounds.json
 func ReadOutboundsConfig(path string) (map[string]interface{}, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("ошибка чтения %s: %w", path, err)
-	}
-
 	var config map[string]interface{}
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("ошибка парсинга %s: %w", path, err)
+	if err := ReadJSONC(path, &config); err != nil {
+		return nil, err
 	}
 
 	return config, nil
 }
 
-// WriteOutboundsConfig записывает конфиг обратно
+// WriteOutboundsConfig записывает конфиг обратно.
+//
+// Backup first, then write through a temp file in the same directory and rename:
+// a half-written config in the directory Xray reads means XKeen cannot start,
+// and the router can lose power mid-write.
+//
+// Comments in the original file are lost — the panel serialises the parsed tree.
 func WriteOutboundsConfig(path string, config map[string]interface{}) error {
 	data, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return fmt.Errorf("ошибка сериализации конфига: %w", err)
 	}
 
-	return os.WriteFile(path, data, 0644)
+	if err := backupFile(path); err != nil {
+		return err
+	}
+
+	return writeFileAtomic(path, data, 0644)
+}
+
+// backupFile keeps a single .bak copy next to the original.
+func backupFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("ошибка чтения %s для резервной копии: %w", path, err)
+	}
+
+	if err := os.WriteFile(path+".bak", data, 0644); err != nil {
+		return fmt.Errorf("не удалось создать резервную копию %s: %w", path+".bak", err)
+	}
+
+	return nil
+}
+
+// RestoreBackup puts the .bak copy back — used when validation rejects a write.
+func RestoreBackup(path string) error {
+	data, err := os.ReadFile(path + ".bak")
+	if err != nil {
+		return fmt.Errorf("резервная копия %s недоступна: %w", path+".bak", err)
+	}
+
+	return writeFileAtomic(path, data, 0644)
+}
+
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("не удалось создать временный файл в %s: %w", dir, err)
+	}
+	tmpName := tmp.Name()
+
+	defer func() {
+		tmp.Close()
+		os.Remove(tmpName)
+	}()
+
+	if _, err := tmp.Write(data); err != nil {
+		return fmt.Errorf("ошибка записи %s: %w", tmpName, err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("ошибка сброса на диск %s: %w", tmpName, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("ошибка закрытия %s: %w", tmpName, err)
+	}
+	if err := os.Chmod(tmpName, perm); err != nil {
+		return fmt.Errorf("ошибка прав доступа %s: %w", tmpName, err)
+	}
+
+	return os.Rename(tmpName, path)
 }
 
 // vlessParams — все параметры из VLESS URI
@@ -94,29 +157,11 @@ func parseVLESSURI(uri string) (*vlessParams, error) {
 	}, nil
 }
 
-// buildOutboundFromURI генерирует ПОЛНЫЙ outbound из VLESS URI
-// tag — тег из существующего конфига (чтобы совпадал с routing)
-func buildOutboundFromURI(p *vlessParams, tag string) map[string]interface{} {
-	// Users
-	user := map[string]interface{}{
-		"id":         p.UUID,
-		"encryption": "none",
-		"level":      0,
-	}
-	if p.Flow != "" {
-		user["flow"] = p.Flow
-	}
-
-	// Settings
-	settings := map[string]interface{}{
-		"vnext": []interface{}{
-			map[string]interface{}{
-				"address": p.Address,
-				"port":    p.Port,
-				"users":   []interface{}{user},
-			},
-		},
-	}
+// buildOutboundFromURI генерирует ПОЛНЫЙ outbound из VLESS URI.
+// tag — тег из существующего конфига (чтобы совпадал с routing),
+// format — форма записи учётных данных, снятая с существующего конфига.
+func buildOutboundFromURI(p *vlessParams, tag string, format outboundFormat) map[string]interface{} {
+	settings := buildVLESSSettings(p, format)
 
 	// StreamSettings
 	streamSettings := map[string]interface{}{}
@@ -262,30 +307,20 @@ func UpdateOutbound(outboundsPath string, server *models.Server) error {
 		return fmt.Errorf("ошибка парсинга URI: %w", err)
 	}
 
-	// Определяем тег из существующего proxy-outbound (чтобы совпадал с routing в 05_routing.json)
-	existingTag := ""
-	replaceIdx := -1
-	for i, ob := range outbounds {
-		outbound, ok := ob.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		tag, _ := outbound["tag"].(string)
-		protocol, _ := outbound["protocol"].(string)
-
-		if protocol != "freedom" && protocol != "blackhole" && tag != "direct" && tag != "block" {
-			existingTag = tag
-			replaceIdx = i
-			break
-		}
+	// A pool means routing picks the node through a balancer; replacing one of
+	// its members would silently break the pool. Pools are handled separately.
+	if n := countProxyOutbounds(outbounds); n > 1 {
+		return fmt.Errorf("в конфиге %d прокси-outbound'ов (пул балансировщика) — переключение по одному не поддерживается", n)
 	}
 
-	if existingTag == "" {
-		existingTag = "vless-reality"
-	}
-
-	// Генерируем полный outbound с правильным тегом
-	newOutbound := buildOutboundFromURI(params, existingTag)
+	// Тег и форма записи берутся из существующего outbound: тег должен совпадать
+	// с routing, а форму (vnext/плоскую) владелец конфига менять не просил.
+	replaceIdx, existing := findProxyOutbound(outbounds)
+	newOutbound := mergeOutbound(existing, buildOutboundFromURI(
+		params,
+		outboundTag(existing),
+		detectOutboundFormat(existing),
+	))
 
 	if replaceIdx >= 0 {
 		outbounds[replaceIdx] = newOutbound
@@ -313,43 +348,15 @@ func GetCurrentOutbound(outboundsPath string) (address string, port int, uuid st
 		return "", 0, "", fmt.Errorf("outbounds не найдены")
 	}
 
-	// Ищем первый proxy-outbound (не direct/block)
-	for _, ob := range outbounds {
-		outbound, ok := ob.(map[string]interface{})
-		if !ok {
+	// Первый proxy-outbound (не direct/block), в любой из двух форм записи
+	for _, raw := range outbounds {
+		outbound, ok := raw.(map[string]interface{})
+		if !ok || isServiceOutbound(outbound) {
 			continue
 		}
-		protocol, _ := outbound["protocol"].(string)
-		tag, _ := outbound["tag"].(string)
-		if protocol == "freedom" || protocol == "blackhole" || tag == "direct" || tag == "block" {
-			continue
+		if address, port, uuid, ok := readProxyEndpoint(outbound); ok {
+			return address, port, uuid, nil
 		}
-
-		settings, _ := outbound["settings"].(map[string]interface{})
-		if settings == nil {
-			continue
-		}
-		vnext, _ := settings["vnext"].([]interface{})
-		if len(vnext) == 0 {
-			continue
-		}
-		entry, _ := vnext[0].(map[string]interface{})
-		if entry == nil {
-			continue
-		}
-
-		address, _ = entry["address"].(string)
-		portF, _ := entry["port"].(float64)
-		port = int(portF)
-
-		users, _ := entry["users"].([]interface{})
-		if len(users) > 0 {
-			user, _ := users[0].(map[string]interface{})
-			if user != nil {
-				uuid, _ = user["id"].(string)
-			}
-		}
-		return
 	}
 
 	return "", 0, "", fmt.Errorf("proxy outbound не найден")
