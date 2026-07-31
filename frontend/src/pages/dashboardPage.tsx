@@ -8,6 +8,7 @@ import { SubscriptionForm } from '@/components/subscriptionForm'
 import { ServerList } from '@/components/serverList'
 import { Controls } from '@/components/controls'
 import { XKeenCard } from '@/components/xkeenCard'
+import { SettingsCard } from '@/components/settingsCard'
 import { PasskeyCard } from '@/components/passkeyCard'
 import { LogViewer } from '@/components/logViewer'
 import { Button } from '@/components/ui/button'
@@ -224,6 +225,7 @@ export function DashboardPage() {
                             onSyncPool={() => poolAction.mutate('sync')}
                             loading={poolAction.isPending || restarting}
                         />
+                        <SettingsCard />
                         <PasskeyCard />
                         <LogViewer
                             logs={logs.data ?? []}

@@ -104,6 +104,11 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/xkeen/stop", handlers.HandleStop)
 			r.Post("/xkeen/selftest", handlers.HandleSelfTest)
 
+			r.Get("/xkeen/settings", handlers.HandleGetSettings)
+			r.Put("/xkeen/settings", handlers.HandleUpdateSettings)
+			r.Get("/xkeen/lists/{name}", handlers.HandleGetList)
+			r.Put("/xkeen/lists/{name}", handlers.HandleUpdateList)
+
 			r.Get("/pool", handlers.HandlePoolStatus)
 			r.Post("/pool/enable", handlers.HandlePoolEnable)
 			r.Post("/pool/disable", handlers.HandlePoolDisable)

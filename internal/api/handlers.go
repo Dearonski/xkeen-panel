@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 	"xkeen-panel/internal/models"
 	"xkeen-panel/internal/monitor"
 	"xkeen-panel/internal/xkeen"
+
+	"github.com/go-chi/chi/v5"
 )
 
 type Handlers struct {
@@ -389,6 +392,98 @@ func (h *Handlers) HandlePoolSync(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "restarting": true})
+}
+
+// HandleGetSettings — GET /api/xkeen/settings (содержимое xkeen.json)
+func (h *Handlers) HandleGetSettings(w http.ResponseWriter, r *http.Request) {
+	rt := h.detector.Runtime()
+
+	cfg, err := xkeen.ReadSettings(rt.XkeenJSON)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"path":     rt.XkeenJSON,
+		"settings": cfg,
+	})
+}
+
+// HandleUpdateSettings — PUT /api/xkeen/settings
+func (h *Handlers) HandleUpdateSettings(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Settings map[string]interface{} `json:"settings"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "неверный формат запроса"})
+		return
+	}
+	if req.Settings == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "поле settings обязательно"})
+		return
+	}
+
+	if err := xkeen.WriteSettings(h.detector.Runtime().XkeenJSON, req.Settings); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+// HandleGetList — GET /api/xkeen/lists/{name} (порты и IP-исключения)
+func (h *Handlers) HandleGetList(w http.ResponseWriter, r *http.Request) {
+	path, kind, err := xkeen.ListPath(h.detector.Runtime(), chi.URLParam(r, "name"))
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"path":    path,
+		"kind":    kind,
+		"content": string(content),
+	})
+}
+
+// HandleUpdateList — PUT /api/xkeen/lists/{name}
+func (h *Handlers) HandleUpdateList(w http.ResponseWriter, r *http.Request) {
+	path, kind, err := xkeen.ListPath(h.detector.Runtime(), chi.URLParam(r, "name"))
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+
+	var req struct {
+		Content string `json:"content"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "неверный формат запроса"})
+		return
+	}
+
+	if err := xkeen.ValidateList(req.Content, kind); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	if err := xkeen.WriteList(path, req.Content); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Списки читает init-скрипт при старте — без перезапуска правила не изменятся
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":        true,
+		"restart_needed": true,
+	})
 }
 
 // HandleLogs — GET /api/logs

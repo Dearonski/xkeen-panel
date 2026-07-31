@@ -52,6 +52,11 @@ export const api = {
             method: 'POST',
             body: body ? JSON.stringify(body) : undefined,
         }),
+    put: <T>(url: string, body?: unknown) =>
+        request<T>(url, {
+            method: 'PUT',
+            body: body ? JSON.stringify(body) : undefined,
+        }),
     del: <T>(url: string, body?: unknown) =>
         request<T>(url, {
             method: 'DELETE',

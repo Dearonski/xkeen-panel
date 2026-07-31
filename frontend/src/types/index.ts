@@ -38,6 +38,17 @@ export type PoolStatus = {
     api_available?: boolean
 }
 
+export type SettingsResponse = {
+    path: string
+    settings: Record<string, any>
+}
+
+export type ListResponse = {
+    path: string
+    kind: 'ports' | 'ips'
+    content: string
+}
+
 export type SelfTestResult = {
     success: boolean
     core: string
