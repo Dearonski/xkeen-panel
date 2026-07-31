@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -16,10 +17,11 @@ type Handlers struct {
 	subscription *xkeen.SubscriptionManager
 	watchdog     *monitor.Watchdog
 	detector     *xkeen.Detector
+	pool         *xkeen.PoolStore
 }
 
-func NewHandlers(cfg *models.Config, sub *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector) *Handlers {
-	return &Handlers{config: cfg, subscription: sub, watchdog: wd, detector: det}
+func NewHandlers(cfg *models.Config, sub *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, pool *xkeen.PoolStore) *Handlers {
+	return &Handlers{config: cfg, subscription: sub, watchdog: wd, detector: det, pool: pool}
 }
 
 // HandleStatus — GET /api/status
@@ -107,9 +109,28 @@ func (h *Handlers) HandleSelectServer(w http.ResponseWriter, r *http.Request) {
 	// Ручной выбор снимает сервер с чёрного списка автопереключения
 	h.watchdog.ClearBlacklist(server.RawURI)
 
+	rt := h.detector.Runtime()
+
+	// В режиме пула ноду выбирает балансировщик, а ручной выбор — это override
+	// через api ядра: мгновенно и без рестарта
+	if top := h.detector.Topology(); top.Mode == xkeen.TopologyPool {
+		if err := h.pinPoolNode(rt, top, req.ID); err != nil {
+			log.Printf("[SELECT] Ошибка закрепления ноды: %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success":    true,
+			"server":     server,
+			"restarting": false,
+			"pinned":     true,
+		})
+		return
+	}
+
 	// Обновить конфиг ядра и проверить его до рестарта — битый конфиг иначе
 	// оставит XKeen незапускаемым
-	rt := h.detector.Runtime()
 	if err := xkeen.ApplyServer(rt, h.config.OutboundsFile, server); err != nil {
 		log.Printf("[SELECT] Ошибка применения конфига: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -130,6 +151,26 @@ func (h *Handlers) HandleSelectServer(w http.ResponseWriter, r *http.Request) {
 		"server":     server,
 		"restarting": true,
 	})
+}
+
+// pinPoolNode закрепляет ноду пула через `xray api bo`. Позиция сервера в
+// подписке совпадает с номером ноды: пул генерируется из того же списка.
+func (h *Handlers) pinPoolNode(rt xkeen.Runtime, top xkeen.Topology, serverID int) error {
+	if serverID < 0 || serverID >= len(top.PoolTags) {
+		return fmt.Errorf("нода для сервера %d не найдена в пуле — обновите пул из подписки", serverID)
+	}
+
+	tag := top.PoolTags[serverID]
+	if err := xkeen.OverrideBalancerTarget(rt, h.config.XrayAPIAddr, top.BalancerTag, tag); err != nil {
+		return fmt.Errorf("%w. Закрепление ноды требует блок api в конфиге Xray — его добавляет `xkeen -sb on`", err)
+	}
+
+	// Override живёт только в памяти ядра — сохраняем, чтобы вернуть после рестарта
+	if err := h.pool.SetPinned(tag); err != nil {
+		log.Printf("[SELECT] Не удалось сохранить закреплённую ноду: %v", err)
+	}
+
+	return nil
 }
 
 // HandleCheckServers — POST /api/servers/check
@@ -216,12 +257,14 @@ func (h *Handlers) HandleStop(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) HandleSelfTest(w http.ResponseWriter, r *http.Request) {
 	rt := h.detector.Runtime()
 
+	// Валидатор ядра логирует по строке на каждый прочитанный файл конфига,
+	// а вердикт пишет в конце — в UI отдаём хвост, а не весь лог
 	output, err := xkeen.TestConfig(rt.Dispatcher, rt.Core)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"success": false,
 			"core":    rt.Core,
-			"output":  output,
+			"output":  xkeen.TailLines(output, 4),
 			"error":   err.Error(),
 		})
 		return
@@ -230,8 +273,122 @@ func (h *Handlers) HandleSelfTest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"core":    rt.Core,
-		"output":  output,
+		"output":  xkeen.TailLines(output, 1),
 	})
+}
+
+// HandlePoolStatus — GET /api/pool
+func (h *Handlers) HandlePoolStatus(w http.ResponseWriter, r *http.Request) {
+	rt := h.detector.Runtime()
+	top := h.detector.Topology()
+	state := h.pool.Get()
+
+	resp := map[string]interface{}{
+		"mode":         top.Mode,
+		"balancer_tag": top.BalancerTag,
+		"pool_tags":    top.PoolTags,
+		"proxy_tags":   top.ProxyTags,
+		"pinned_tag":   state.PinnedTag,
+		"core":         rt.Core,
+	}
+
+	// Текущая нода известна только через api ядра; его наличие не гарантировано
+	if top.Mode == xkeen.TopologyPool {
+		if target, err := xkeen.CurrentBalancerTarget(rt, h.config.XrayAPIAddr, top.BalancerTag); err == nil {
+			resp["current_tag"] = target
+			resp["api_available"] = true
+		} else {
+			resp["api_available"] = false
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// HandlePoolEnable — POST /api/pool/enable. Собирает пул из подписки и
+// переводит правила маршрутизации на балансировщик.
+func (h *Handlers) HandlePoolEnable(w http.ResponseWriter, r *http.Request) {
+	servers := h.subscription.GetServers()
+	if len(servers) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "подписка пуста — нечего добавлять в пул"})
+		return
+	}
+
+	rt := h.detector.Runtime()
+	state, err := xkeen.EnablePool(rt, h.config.OutboundsFile, servers, xkeen.PoolOptions{APIAddr: h.config.XrayAPIAddr})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	if err := h.pool.Set(state); err != nil {
+		log.Printf("[POOL] Не удалось сохранить состояние пула: %v", err)
+	}
+	h.detector.InvalidateTopology()
+
+	go func() {
+		if _, err := xkeen.Restart(rt.Dispatcher); err != nil {
+			log.Printf("[POOL] Ошибка рестарта: %v", err)
+		}
+	}()
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":      true,
+		"balancer_tag": state.BalancerTag,
+		"restarting":   true,
+	})
+}
+
+// HandlePoolDisable — POST /api/pool/disable. Возвращает конфиг к одному
+// outbound с активным сервером.
+func (h *Handlers) HandlePoolDisable(w http.ResponseWriter, r *http.Request) {
+	server := h.subscription.GetActiveServer()
+	if server == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "нет активного сервера, к которому можно вернуться"})
+		return
+	}
+
+	rt := h.detector.Runtime()
+	if err := xkeen.DisablePool(rt, h.config.OutboundsFile, server, h.pool.Get()); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	if err := h.pool.Set(xkeen.PoolState{}); err != nil {
+		log.Printf("[POOL] Не удалось очистить состояние пула: %v", err)
+	}
+	h.detector.InvalidateTopology()
+
+	go func() {
+		if _, err := xkeen.Restart(rt.Dispatcher); err != nil {
+			log.Printf("[POOL] Ошибка рестарта: %v", err)
+		}
+	}()
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "restarting": true})
+}
+
+// HandlePoolSync — POST /api/pool/sync. Приводит состав пула к подписке.
+func (h *Handlers) HandlePoolSync(w http.ResponseWriter, r *http.Request) {
+	rt := h.detector.Runtime()
+	state := h.pool.Get()
+	if state.Selector == "" {
+		state.Selector = xkeen.DefaultPoolSelector
+	}
+
+	if err := xkeen.SyncPool(rt, h.config.OutboundsFile, h.subscription.GetServers(), state); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	h.detector.InvalidateTopology()
+
+	go func() {
+		if _, err := xkeen.Restart(rt.Dispatcher); err != nil {
+			log.Printf("[POOL] Ошибка рестарта: %v", err)
+		}
+	}()
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "restarting": true})
 }
 
 // HandleLogs — GET /api/logs

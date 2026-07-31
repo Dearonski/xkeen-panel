@@ -3,6 +3,7 @@ package xkeen
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	"xkeen-panel/internal/models"
 )
@@ -35,25 +36,26 @@ func ApplyServer(rt Runtime, outboundsPath string, server *models.Server) error 
 
 	log.Printf("[APPLY] Конфиг не прошёл проверку — выполнен откат")
 
-	return fmt.Errorf("конфигурация %s не прошла проверку, изменения отменены: %s", rt.Core, firstLines(output, 5))
+	return fmt.Errorf("конфигурация %s не прошла проверку, изменения отменены: %s", rt.Core, TailLines(output, 4))
 }
 
-// firstLines trims validator output to something a UI can show.
-func firstLines(s string, n int) string {
-	if s == "" {
+// TailLines trims validator output to something a UI can show. The tail is what
+// matters: `xray -test` logs a line per config file it reads and only then
+// prints the failure, so the head is noise.
+func TailLines(s string, n int) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+
+	kept := make([]string, 0, n)
+	for i := len(lines) - 1; i >= 0 && len(kept) < n; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line != "" {
+			kept = append([]string{line}, kept...)
+		}
+	}
+
+	if len(kept) == 0 {
 		return "вывод пуст"
 	}
 
-	lines := 0
-	for i, c := range s {
-		if c != '\n' {
-			continue
-		}
-		lines++
-		if lines == n {
-			return s[:i]
-		}
-	}
-
-	return s
+	return strings.Join(kept, "; ")
 }

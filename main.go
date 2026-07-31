@@ -54,6 +54,13 @@ func main() {
 		log.Printf("XKeen %s (поколение %d), ядро %s, режим %s", rt.Version, rt.Generation, rt.Core, rt.Mode)
 	}
 
+	// Состояние пула: тег, под который написаны правила маршрутизации, нужен,
+	// чтобы корректно вернуться к одиночному outbound
+	poolStore := xkeen.NewPoolStore(cfg.DataDir)
+	if err := poolStore.Load(); err != nil {
+		log.Printf("Предупреждение: не удалось загрузить состояние пула: %v", err)
+	}
+
 	// Инициализация watchdog и SSE
 	watchdog := monitor.NewWatchdog(cfg, subManager, detector)
 	eventBus := sse.NewEventBus()
@@ -109,7 +116,7 @@ func main() {
 	}
 
 	// HTTP-сервер
-	srv := server.New(cfg, userManager, subManager, watchdog, detector, eventBus, frontendFS)
+	srv := server.New(cfg, userManager, subManager, watchdog, detector, poolStore, eventBus, frontendFS)
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Port),
 		Handler: srv.Handler(),

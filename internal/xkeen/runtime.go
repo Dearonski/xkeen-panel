@@ -16,6 +16,7 @@ type Runtime struct {
 	Dispatcher  string `json:"-"`
 	InitScript  string `json:"-"`
 	Core        string `json:"core"` // xray | mihomo
+	CoreBin     string `json:"-"`    // /opt/sbin/<core>, used for `xray api …`
 	Mode        string `json:"mode"` // TProxy | Hybrid | Redirect | Other
 	Version     string `json:"version"`
 	XrayConfDir string `json:"-"`
@@ -41,6 +42,10 @@ type Detector struct {
 	cached   Runtime
 	cachedAt time.Time
 	initStat time.Time
+
+	topoMu sync.Mutex
+	topo   Topology
+	topoAt time.Time
 }
 
 const (
@@ -98,6 +103,29 @@ func (d *Detector) Runtime() Runtime {
 	d.initStat = stat
 
 	return d.cached
+}
+
+// Topology returns the cached config topology. Reading it parses every JSON in
+// the core config directory, which is too expensive for a per-poll status call.
+func (d *Detector) Topology() Topology {
+	d.topoMu.Lock()
+	defer d.topoMu.Unlock()
+
+	if time.Since(d.topoAt) < 15*time.Second && d.topo.Mode != "" {
+		return d.topo
+	}
+
+	d.topo = ReadTopology(d.Runtime())
+	d.topoAt = time.Now()
+
+	return d.topo
+}
+
+// InvalidateTopology drops the cache after the panel rewrites the config.
+func (d *Detector) InvalidateTopology() {
+	d.topoMu.Lock()
+	d.topoAt = time.Time{}
+	d.topoMu.Unlock()
 }
 
 // resolveInitScript prefers the explicit override, then the 2.x layout, then 1.x.
@@ -169,6 +197,9 @@ func (d *Detector) detect(initScript string) Runtime {
 	if r.Mode == "" {
 		r.Mode = "Other"
 	}
+
+	// The cores live next to the dispatcher (/opt/sbin), where XKeen installs them
+	r.CoreBin = filepath.Join(filepath.Dir(r.Dispatcher), r.Core)
 
 	r.Version = d.detectVersion(r.Dispatcher)
 

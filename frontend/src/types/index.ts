@@ -27,6 +27,17 @@ export type Status = {
     generation: number
 }
 
+export type PoolStatus = {
+    mode: 'single' | 'pool'
+    core: string
+    balancer_tag?: string
+    pool_tags?: string[]
+    proxy_tags?: string[]
+    pinned_tag?: string
+    current_tag?: string
+    api_available?: boolean
+}
+
 export type SelfTestResult = {
     success: boolean
     core: string

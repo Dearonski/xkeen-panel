@@ -24,17 +24,19 @@ type Server struct {
 	subscription *xkeen.SubscriptionManager
 	watchdog     *monitor.Watchdog
 	detector     *xkeen.Detector
+	pool         *xkeen.PoolStore
 	eventBus     *sse.EventBus
 	frontendFS   fs.FS
 }
 
-func New(cfg *models.Config, um *auth.UserManager, sub *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, bus *sse.EventBus, frontendFS fs.FS) *Server {
+func New(cfg *models.Config, um *auth.UserManager, sub *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, pool *xkeen.PoolStore, bus *sse.EventBus, frontendFS fs.FS) *Server {
 	return &Server{
 		config:       cfg,
 		userManager:  um,
 		subscription: sub,
 		watchdog:     wd,
 		detector:     det,
+		pool:         pool,
 		eventBus:     bus,
 		frontendFS:   frontendFS,
 	}
@@ -53,7 +55,7 @@ func (s *Server) Handler() http.Handler {
 	// Хендлеры
 	authHandler := api.NewAuthHandler(s.userManager, rateLimiter, s.config)
 	webAuthnHandler := api.NewWebAuthnHandler(s.userManager, rateLimiter, s.config)
-	handlers := api.NewHandlers(s.config, s.subscription, s.watchdog, s.detector)
+	handlers := api.NewHandlers(s.config, s.subscription, s.watchdog, s.detector, s.pool)
 
 	// API-маршруты
 	r.Route("/api", func(r chi.Router) {
@@ -101,6 +103,11 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/xkeen/start", handlers.HandleStart)
 			r.Post("/xkeen/stop", handlers.HandleStop)
 			r.Post("/xkeen/selftest", handlers.HandleSelfTest)
+
+			r.Get("/pool", handlers.HandlePoolStatus)
+			r.Post("/pool/enable", handlers.HandlePoolEnable)
+			r.Post("/pool/disable", handlers.HandlePoolDisable)
+			r.Post("/pool/sync", handlers.HandlePoolSync)
 
 			r.Get("/logs", handlers.HandleLogs)
 

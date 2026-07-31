@@ -168,6 +168,13 @@ func (w *Watchdog) check() {
 }
 
 func (w *Watchdog) handleFailover(reason string) {
+	// В режиме пула ноду выбирает балансировщик ядра (leastPing + observatory),
+	// и делает это без рестарта. Задача watchdog здесь — состав пула, а не выбор.
+	if top := w.detector.Topology(); top.Mode == xkeen.TopologyPool {
+		w.handlePoolFailover(reason, top)
+		return
+	}
+
 	w.writeLog("[FAILOVER] %s — подбор лучшего сервера...", reason)
 
 	// Запомнить упавший сервер ДО обновления подписки — иначе, если он исчез из
@@ -210,6 +217,53 @@ func (w *Watchdog) handleFailover(reason string) {
 	w.mu.Unlock()
 
 	w.writeLog("[FAILOVER] Перезапуск выполнен, ожидание следующей проверки")
+}
+
+// handlePoolFailover обновляет подписку и приводит состав пула в соответствие с
+// ней. Перезапуск — только если пул реально разошёлся с подпиской: рестарт рвёт
+// соединения, а переключение между живыми нодами балансировщик делает сам.
+func (w *Watchdog) handlePoolFailover(reason string, top xkeen.Topology) {
+	w.writeLog("[POOL] %s — выбор ноды за балансировщиком %q, проверяю состав пула", reason, top.BalancerTag)
+
+	if _, err := w.subscription.Refresh(); err != nil {
+		w.writeLog("[WARN] Не удалось обновить подписку: %v", err)
+	}
+
+	selector := xkeen.DefaultPoolSelector
+	if len(top.Selectors) > 0 {
+		selector = top.Selectors[0]
+	}
+
+	servers := w.subscription.GetServers()
+	matches, err := xkeen.PoolMatchesSubscription(w.config.OutboundsFile, servers, selector)
+	if err != nil {
+		w.writeLog("[ERROR] Не удалось сверить пул с подпиской: %v", err)
+		return
+	}
+	if matches {
+		w.writeLog("[POOL] Пул совпадает с подпиской — конфиг не трогаем")
+		return
+	}
+
+	rt := w.detector.Runtime()
+	state := xkeen.PoolState{BalancerTag: top.BalancerTag, Selector: selector}
+	if err := xkeen.SyncPool(rt, w.config.OutboundsFile, servers, state); err != nil {
+		w.writeLog("[ERROR] Пул не синхронизирован: %v", err)
+		return
+	}
+	w.detector.InvalidateTopology()
+
+	if output, err := xkeen.Restart(rt.Dispatcher); err != nil {
+		w.writeLog("[ERROR] Ошибка перезапуска: %v (%s)", err, output)
+		return
+	}
+
+	w.mu.Lock()
+	w.failCount = 0
+	w.latencyHigh = 0
+	w.mu.Unlock()
+
+	w.writeLog("[POOL] Пул приведён к подписке (%d нод), ядро перезапущено", len(servers))
 }
 
 // selectBest подбирает живой сервер с минимальным пингом, избегая текущего,

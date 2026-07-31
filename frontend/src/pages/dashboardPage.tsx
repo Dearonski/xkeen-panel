@@ -7,11 +7,18 @@ import { StatusBadge } from '@/components/statusBadge'
 import { SubscriptionForm } from '@/components/subscriptionForm'
 import { ServerList } from '@/components/serverList'
 import { Controls } from '@/components/controls'
+import { XKeenCard } from '@/components/xkeenCard'
 import { PasskeyCard } from '@/components/passkeyCard'
 import { LogViewer } from '@/components/logViewer'
 import { Button } from '@/components/ui/button'
 import { IconLogout, IconLoader2 } from '@tabler/icons-react'
-import type { Status, SubscriptionInfo, Server, SelfTestResult } from '@/types'
+import type {
+    Status,
+    SubscriptionInfo,
+    Server,
+    SelfTestResult,
+    PoolStatus,
+} from '@/types'
 
 export function DashboardPage() {
     const { logout } = useAuth()
@@ -40,6 +47,11 @@ export function DashboardPage() {
             api
                 .get<{ servers: Server[] }>('/api/servers')
                 .then(d => d.servers ?? []),
+    })
+
+    const pool = useQuery({
+        queryKey: ['pool'],
+        queryFn: () => api.get<PoolStatus>('/api/pool'),
     })
 
     const logs = useQuery({
@@ -101,6 +113,20 @@ export function DashboardPage() {
     const stop = useMutation({
         mutationFn: () => api.post('/api/xkeen/stop'),
         onSettled: () => qc.invalidateQueries({ queryKey: ['status'] }),
+    })
+
+    const poolAction = useMutation({
+        mutationFn: (action: 'enable' | 'disable' | 'sync') =>
+            api.post(`/api/pool/${action}`),
+        onMutate: () => {
+            qc.setQueryData<Status>(['status'], old =>
+                old ? { ...old, restarting: true } : old,
+            )
+        },
+        onSettled: () => {
+            qc.invalidateQueries({ queryKey: ['pool'] })
+            qc.invalidateQueries({ queryKey: ['status'] })
+        },
     })
 
     const setCountry = useMutation({
@@ -189,6 +215,14 @@ export function DashboardPage() {
                                 stop.isPending ||
                                 restarting
                             }
+                        />
+                        <XKeenCard
+                            status={s}
+                            pool={pool.data}
+                            onEnablePool={() => poolAction.mutate('enable')}
+                            onDisablePool={() => poolAction.mutate('disable')}
+                            onSyncPool={() => poolAction.mutate('sync')}
+                            loading={poolAction.isPending || restarting}
                         />
                         <PasskeyCard />
                         <LogViewer

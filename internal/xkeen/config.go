@@ -144,7 +144,7 @@ func parseVLESSURI(uri string) (*vlessParams, error) {
 		Network:     q.Get("type"),
 		SNI:         q.Get("sni"),
 		Fingerprint: q.Get("fp"),
-		PublicKey:    q.Get("pbk"),
+		PublicKey:   q.Get("pbk"),
 		ShortID:     q.Get("sid"),
 		SpiderX:     q.Get("spx"),
 		Host:        q.Get("host"),
