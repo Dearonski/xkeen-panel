@@ -19,6 +19,7 @@ import (
 type Watchdog struct {
 	config       *models.Config
 	subscription *xkeen.SubscriptionManager
+	detector     *xkeen.Detector
 	mu           sync.RWMutex
 	active       bool
 	failCount    int
@@ -34,10 +35,11 @@ type Watchdog struct {
 	blacklist    map[string]time.Time // ключ — RawURI, устойчив к переиндексации
 }
 
-func NewWatchdog(cfg *models.Config, sub *xkeen.SubscriptionManager) *Watchdog {
+func NewWatchdog(cfg *models.Config, sub *xkeen.SubscriptionManager, det *xkeen.Detector) *Watchdog {
 	return &Watchdog{
 		config:       cfg,
 		subscription: sub,
+		detector:     det,
 		active:       false, // По умолчанию выключен — включается вручную из UI
 		startTime:    time.Now(),
 		lastLatency:  -1,
@@ -191,12 +193,13 @@ func (w *Watchdog) handleFailover(reason string) {
 
 	w.writeLog("[FAILOVER] Выбран сервер: %s (%s:%d, %dms)", server.Name, server.Address, server.Port, server.Latency)
 
+	rt := w.detector.Runtime()
 	if err := xkeen.UpdateOutbound(w.config.OutboundsFile, server); err != nil {
 		w.writeLog("[ERROR] Ошибка обновления конфига Xray: %v", err)
 		return
 	}
 
-	if output, err := xkeen.Restart(w.config.XKeenPath); err != nil {
+	if output, err := xkeen.Restart(rt.Dispatcher); err != nil {
 		w.writeLog("[ERROR] Ошибка перезапуска: %v (%s)", err, output)
 		return
 	}
@@ -408,22 +411,28 @@ func (w *Watchdog) GetStatus() models.Status {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
+	rt := w.detector.Runtime()
+
 	restarting := xkeen.IsRestarting()
-	xrayRunning := xkeen.IsRunning()
+	coreRunning := xkeen.IsRunning(rt.Core)
 
 	// Во время рестарта состояние xray ненадёжно — процесс может быть
 	// ещё жив или уже убит, не показываем "connected" чтобы не вводить в заблуждение
 	if restarting {
-		xrayRunning = false
+		coreRunning = false
 	}
 
 	status := models.Status{
 		Connected:      w.connected && !restarting,
-		XrayRunning:    xrayRunning,
+		XrayRunning:    coreRunning,
 		Restarting:     restarting,
 		Latency:        w.lastLatency,
 		LastCheck:      w.lastCheck,
 		WatchdogActive: w.active,
+		Core:           rt.Core,
+		Mode:           rt.Mode,
+		XKeenVersion:   rt.Version,
+		Generation:     rt.Generation,
 	}
 
 	// Uptime

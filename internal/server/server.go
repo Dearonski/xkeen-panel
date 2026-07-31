@@ -23,16 +23,18 @@ type Server struct {
 	userManager  *auth.UserManager
 	subscription *xkeen.SubscriptionManager
 	watchdog     *monitor.Watchdog
+	detector     *xkeen.Detector
 	eventBus     *sse.EventBus
 	frontendFS   fs.FS
 }
 
-func New(cfg *models.Config, um *auth.UserManager, sub *xkeen.SubscriptionManager, wd *monitor.Watchdog, bus *sse.EventBus, frontendFS fs.FS) *Server {
+func New(cfg *models.Config, um *auth.UserManager, sub *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, bus *sse.EventBus, frontendFS fs.FS) *Server {
 	return &Server{
 		config:       cfg,
 		userManager:  um,
 		subscription: sub,
 		watchdog:     wd,
+		detector:     det,
 		eventBus:     bus,
 		frontendFS:   frontendFS,
 	}
@@ -51,7 +53,7 @@ func (s *Server) Handler() http.Handler {
 	// Хендлеры
 	authHandler := api.NewAuthHandler(s.userManager, rateLimiter, s.config)
 	webAuthnHandler := api.NewWebAuthnHandler(s.userManager, rateLimiter, s.config)
-	handlers := api.NewHandlers(s.config, s.subscription, s.watchdog)
+	handlers := api.NewHandlers(s.config, s.subscription, s.watchdog, s.detector)
 
 	// API-маршруты
 	r.Route("/api", func(r chi.Router) {
@@ -96,7 +98,9 @@ func (s *Server) Handler() http.Handler {
 			r.Delete("/account/passkey", webAuthnHandler.HandlePasskeyDelete)
 
 			r.Post("/xkeen/restart", handlers.HandleRestart)
-			r.Post("/xkeen/update", handlers.HandleUpdate)
+			r.Post("/xkeen/start", handlers.HandleStart)
+			r.Post("/xkeen/stop", handlers.HandleStop)
+			r.Post("/xkeen/selftest", handlers.HandleSelfTest)
 
 			r.Get("/logs", handlers.HandleLogs)
 

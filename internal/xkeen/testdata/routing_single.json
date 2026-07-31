@@ -1,0 +1,62 @@
+// Настройка маршрутизации
+{
+    "routing": {
+        "domainStrategy": "IPIfNonMatch",
+        "rules": [
+            // Блокировка  |   Уязвимые UDP порты
+            {
+                "inboundTag": ["redirect", "tproxy"],
+                "outboundTag": "block",
+                "type": "field",
+                "network": "udp",
+                "port": "135, 137, 138, 139"
+            },
+            // Блокировка  |  Реклама и аналитика
+            {
+                "inboundTag": ["redirect", "tproxy"],
+                "outboundTag": "block",
+                "type": "field",
+                "domain": ["appcenter.ms"]
+            },
+
+            // Прямые подключение  |  Доменные имена
+            {
+                "inboundTag": ["redirect", "tproxy"],
+                "outboundTag": "direct",
+                "type": "field",
+                "domain": [
+                    "regexp:^([\\w\\-\\.]+\\.)ru$", // .ru
+                    "regexp:^([\\w\\-\\.]+\\.)su$", // .su
+                    "regexp:^([\\w\\-\\.]+\\.)xn--p1ai$", // .рф
+                    "regexp:^([\\w\\-\\.]+\\.)xn--p1acf$", // .рус
+                    "regexp:^([\\w\\-\\.]+\\.)xn--80asehdb$", // .онлайн
+                    "regexp:^([\\w\\-\\.]+\\.)xn--c1avg$", // .орг
+                    "regexp:^([\\w\\-\\.]+\\.)xn--80aswg$", // .сайт
+                    "regexp:^([\\w\\-\\.]+\\.)xn--80adxhks$", // .москва
+                    "regexp:^([\\w\\-\\.]+\\.)moscow$", //  .moscow
+                    "regexp:^([\\w\\-\\.]+\\.)xn--d1acj3b$", // .дети
+                    "ext:geosite_v2fly.dat:category-gov-ru",
+                    "ext:geosite_v2fly.dat:private",
+                    "ext:geosite_v2fly.dat:yandex",
+                    "ext:geosite_v2fly.dat:steam",
+                    "ext:geosite_v2fly.dat:vk"
+                ]
+            },
+
+            // Прямое подключение  |  Торрент
+            {
+                "inboundTag": ["redirect", "tproxy"],
+                "outboundTag": "direct",
+                "type": "field",
+                "protocol": ["bittorrent"]
+            },
+
+            // VPS подключение
+            {
+                "inboundTag": ["redirect", "tproxy"],
+                "outboundTag": "vless-reality",
+                "type": "field"
+            }
+        ]
+    }
+}

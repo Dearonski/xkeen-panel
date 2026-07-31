@@ -34,7 +34,7 @@ func TestAllowedActiveOrBest(t *testing.T) {
 	subOk := subWith(t, []models.Server{
 		{ID: 0, Name: "nl", Country: "NL", Protocol: "vless", RawURI: "u-nl", Active: true},
 	}, 0)
-	if got := NewWatchdog(cfg, subOk).AllowedActiveOrBest(); got == nil || got.Country != "NL" {
+	if got := NewWatchdog(cfg, subOk, xkeen.NewDetector(t.TempDir(), "", "", "", "", "", "")).AllowedActiveOrBest(); got == nil || got.Country != "NL" {
 		t.Errorf("ожидался активный NL, got %+v", got)
 	}
 
@@ -42,7 +42,7 @@ func TestAllowedActiveOrBest(t *testing.T) {
 	subRu := subWith(t, []models.Server{
 		{ID: 0, Name: "ru", Country: "RU", Protocol: "vless", RawURI: "u-ru", Active: true},
 	}, 0)
-	if got := NewWatchdog(cfg, subRu).AllowedActiveOrBest(); got == nil || got.Country != "RU" {
+	if got := NewWatchdog(cfg, subRu, xkeen.NewDetector(t.TempDir(), "", "", "", "", "", "")).AllowedActiveOrBest(); got == nil || got.Country != "RU" {
 		t.Errorf("ожидался fallback на текущий RU, got %+v", got)
 	}
 }

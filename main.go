@@ -44,8 +44,18 @@ func main() {
 		log.Printf("Предупреждение: ошибка загрузки подписки: %v", err)
 	}
 
+	// Detect the XKeen layout: generation (S05xkeen/S24xray), core, mode, version
+	detector := xkeen.NewDetector("", cfg.XKeenPath, cfg.InitScript,
+		cfg.XrayConfigDir, cfg.RoutingFile, cfg.MihomoConfig, cfg.XkeenJSON)
+	rt := detector.Runtime()
+	if !rt.Installed {
+		log.Printf("XKeen не найден (%s) — управление ядром недоступно", rt.InitScript)
+	} else {
+		log.Printf("XKeen %s (поколение %d), ядро %s, режим %s", rt.Version, rt.Generation, rt.Core, rt.Mode)
+	}
+
 	// Инициализация watchdog и SSE
-	watchdog := monitor.NewWatchdog(cfg, subManager)
+	watchdog := monitor.NewWatchdog(cfg, subManager, detector)
 	eventBus := sse.NewEventBus()
 	watchdog.SetEventBus(eventBus)
 
@@ -86,7 +96,7 @@ func main() {
 
 	// Периодическое автообновление подписки
 	if cfg.SubscriptionRefreshInterval > 0 {
-		go runSubscriptionRefresh(ctx, cfg, subManager, watchdog, eventBus)
+		go runSubscriptionRefresh(ctx, cfg, subManager, watchdog, detector, eventBus)
 	}
 
 	// Подготовка фронтенда
@@ -99,7 +109,7 @@ func main() {
 	}
 
 	// HTTP-сервер
-	srv := server.New(cfg, userManager, subManager, watchdog, eventBus, frontendFS)
+	srv := server.New(cfg, userManager, subManager, watchdog, detector, eventBus, frontendFS)
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Port),
 		Handler: srv.Handler(),
@@ -133,7 +143,7 @@ func main() {
 // runSubscriptionRefresh периодически обновляет подписку. Xray перезапускается
 // только если активный сервер реально заменился (исчез из подписки) — иначе
 // обновление не должно рвать соединение.
-func runSubscriptionRefresh(ctx context.Context, cfg *models.Config, sm *xkeen.SubscriptionManager, wd *monitor.Watchdog, bus *sse.EventBus) {
+func runSubscriptionRefresh(ctx context.Context, cfg *models.Config, sm *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, bus *sse.EventBus) {
 	interval := time.Duration(cfg.SubscriptionRefreshInterval) * time.Second
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -176,11 +186,12 @@ func runSubscriptionRefresh(ctx context.Context, cfg *models.Config, sm *xkeen.S
 			// выбор гео-фильтру watchdog.
 			if active != nil && newURI != prevURI {
 				if target := wd.AllowedActiveOrBest(); target != nil {
+					rt := det.Runtime()
 					if err := xkeen.UpdateOutbound(cfg.OutboundsFile, target); err != nil {
 						log.Printf("[AUTO-UPDATE] Ошибка конфига: %v", err)
 					} else {
-						xkeen.Restart(cfg.XKeenPath)
-						log.Printf("[AUTO-UPDATE] Активный сервер заменён на %s, xray перезапущен", target.Name)
+						xkeen.Restart(rt.Dispatcher)
+						log.Printf("[AUTO-UPDATE] Активный сервер заменён на %s, ядро перезапущено", target.Name)
 					}
 				}
 			}
@@ -206,7 +217,7 @@ func loadConfig(path string) (*models.Config, error) {
 		DataDir:       "data",
 		XKeenPath:     "/opt/sbin/xkeen",
 		OutboundsFile: "/opt/etc/xray/configs/04_outbounds.json",
-		InitScript:    "/opt/etc/init.d/S24xray",
+		XrayAPIAddr:   "127.0.0.1:10085",
 		CheckInterval: 120,
 		CheckURL:      "https://www.google.com",
 		MaxFails:      3,

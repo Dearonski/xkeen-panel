@@ -17,7 +17,7 @@ import (
 func newWatchdog(t *testing.T, cfg *models.Config) *Watchdog {
 	t.Helper()
 	sub := xkeen.NewSubscriptionManager(t.TempDir())
-	return NewWatchdog(cfg, sub)
+	return NewWatchdog(cfg, sub, xkeen.NewDetector(t.TempDir(), "", "", "", "", "", ""))
 }
 
 func TestIsAvoidedCountry(t *testing.T) {

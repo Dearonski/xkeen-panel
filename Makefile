@@ -38,7 +38,7 @@ build-local: build-frontend
 # === Деплой ===
 
 # Диск роутера = /opt/ на роутере
-ROUTER_DISK ?= /Volumes/2bdb2bac-02b0-480a-9d7d-3affdea7b5ee
+ROUTER_DISK ?= /Volumes/bc89cc32-b398-4623-8c4a-e166db166e0c
 
 deploy-disk: build-arm64
 	mkdir -p $(ROUTER_DISK)/etc/xkeen-panel/data

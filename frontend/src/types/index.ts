@@ -21,6 +21,17 @@ export type Status = {
     uptime: string
     last_check: string
     watchdog_active: boolean
+    core: 'xray' | 'mihomo'
+    mode: string
+    xkeen_version: string
+    generation: number
+}
+
+export type SelfTestResult = {
+    success: boolean
+    core: string
+    output: string
+    error?: string
 }
 
 export type SubscriptionInfo = {

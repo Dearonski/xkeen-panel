@@ -12,11 +12,19 @@ type Config struct {
 	DataDir       string `yaml:"data_dir"`
 	XKeenPath     string `yaml:"xkeen_path"`
 	OutboundsFile string `yaml:"outbounds_file"`
-	InitScript    string `yaml:"init_script"`
 	CheckInterval int    `yaml:"check_interval"`
 	CheckURL      string `yaml:"check_url"`
 	MaxFails      int    `yaml:"max_fails"`
 	LogFile       string `yaml:"log_file"`
+
+	// XKeen layout. Every field is optional — the panel detects the layout of
+	// both the 1.x (S24xray) and 2.x (S05xkeen) installs on startup.
+	InitScript    string `yaml:"init_script"` // deprecated: kept so old config.yaml still loads
+	XrayConfigDir string `yaml:"xray_config_dir"`
+	RoutingFile   string `yaml:"routing_file"`
+	MihomoConfig  string `yaml:"mihomo_config"`
+	XkeenJSON     string `yaml:"xkeen_json"`
+	XrayAPIAddr   string `yaml:"xray_api_addr"`
 
 	// Автопилот: проверка задержек и переключение серверов
 	ProbeTimeoutMs     int  `yaml:"probe_timeout_ms"`
@@ -92,6 +100,13 @@ type Status struct {
 	Uptime         string    `json:"uptime"`
 	LastCheck      time.Time `json:"last_check"`
 	WatchdogActive bool      `json:"watchdog_active"`
+
+	// XKeen runtime: proxy core (xray/mihomo), proxying mode (TProxy/Hybrid/…),
+	// version and layout generation.
+	Core         string `json:"core"`
+	Mode         string `json:"mode"`
+	XKeenVersion string `json:"xkeen_version"`
+	Generation   int    `json:"generation"`
 }
 
 // SetupRequest — запрос на первичную регистрацию

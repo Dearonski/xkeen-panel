@@ -15,10 +15,11 @@ type Handlers struct {
 	config       *models.Config
 	subscription *xkeen.SubscriptionManager
 	watchdog     *monitor.Watchdog
+	detector     *xkeen.Detector
 }
 
-func NewHandlers(cfg *models.Config, sub *xkeen.SubscriptionManager, wd *monitor.Watchdog) *Handlers {
-	return &Handlers{config: cfg, subscription: sub, watchdog: wd}
+func NewHandlers(cfg *models.Config, sub *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector) *Handlers {
+	return &Handlers{config: cfg, subscription: sub, watchdog: wd, detector: det}
 }
 
 // HandleStatus — GET /api/status
@@ -107,6 +108,7 @@ func (h *Handlers) HandleSelectServer(w http.ResponseWriter, r *http.Request) {
 	h.watchdog.ClearBlacklist(server.RawURI)
 
 	// Обновить конфиг Xray (04_outbounds.json) — генерирует полный outbound из URI
+	rt := h.detector.Runtime()
 	if err := xkeen.UpdateOutbound(h.config.OutboundsFile, server); err != nil {
 		log.Printf("[SELECT] Ошибка UpdateOutbound: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "ошибка обновления конфига: " + err.Error()})
@@ -115,9 +117,9 @@ func (h *Handlers) HandleSelectServer(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[SELECT] Конфиг обновлён, запускаем рестарт...")
 
-	// Перезапустить Xray — не блокируем ответ
+	// Restart the core without blocking the response
 	go func() {
-		if _, err := xkeen.Restart(h.config.XKeenPath); err != nil {
+		if _, err := xkeen.Restart(rt.Dispatcher); err != nil {
 			log.Printf("[SELECT] Ошибка рестарта: %v", err)
 		}
 	}()
@@ -158,9 +160,10 @@ func (h *Handlers) HandleSetCountry(w http.ResponseWriter, r *http.Request) {
 
 // HandleRestart — POST /api/xkeen/restart
 func (h *Handlers) HandleRestart(w http.ResponseWriter, r *http.Request) {
-	log.Printf("[RESTART-API] Кнопка рестарта нажата, xkeen_path=%s", h.config.XKeenPath)
+	rt := h.detector.Runtime()
+	log.Printf("[RESTART-API] Кнопка рестарта нажата, xkeen=%s", rt.Dispatcher)
 
-	output, err := xkeen.Restart(h.config.XKeenPath)
+	output, err := xkeen.Restart(rt.Dispatcher)
 	if err != nil {
 		log.Printf("[RESTART-API] Ошибка: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
@@ -178,19 +181,54 @@ func (h *Handlers) HandleRestart(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HandleUpdate — POST /api/xkeen/update
-func (h *Handlers) HandleUpdate(w http.ResponseWriter, r *http.Request) {
-	output, err := xkeen.Update(h.config.XKeenPath)
+// HandleStart — POST /api/xkeen/start
+func (h *Handlers) HandleStart(w http.ResponseWriter, r *http.Request) {
+	output, err := xkeen.Start(h.detector.Runtime().Dispatcher)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error":  err.Error(),
+			"error":  "не удалось запустить: " + err.Error(),
 			"output": output,
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "output": output})
+}
+
+// HandleStop — POST /api/xkeen/stop
+func (h *Handlers) HandleStop(w http.ResponseWriter, r *http.Request) {
+	output, err := xkeen.Stop(h.detector.Runtime().Dispatcher)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error":  "не удалось остановить: " + err.Error(),
+			"output": output,
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "output": output})
+}
+
+// HandleSelfTest — POST /api/xkeen/selftest. Replaces the old CLI update: XKeen
+// 2.0 has no `-u` flag, and `-uk`/`-ux` are interactive, so validating the core
+// config is both more useful and safer for a web button.
+func (h *Handlers) HandleSelfTest(w http.ResponseWriter, r *http.Request) {
+	rt := h.detector.Runtime()
+
+	output, err := xkeen.TestConfig(rt.Dispatcher, rt.Core)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"success": false,
+			"core":    rt.Core,
+			"output":  output,
+			"error":   err.Error(),
 		})
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
+		"core":    rt.Core,
 		"output":  output,
 	})
 }

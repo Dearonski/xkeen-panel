@@ -11,7 +11,7 @@ import { PasskeyCard } from '@/components/passkeyCard'
 import { LogViewer } from '@/components/logViewer'
 import { Button } from '@/components/ui/button'
 import { IconLogout, IconLoader2 } from '@tabler/icons-react'
-import type { Status, SubscriptionInfo, Server } from '@/types'
+import type { Status, SubscriptionInfo, Server, SelfTestResult } from '@/types'
 
 export function DashboardPage() {
     const { logout } = useAuth()
@@ -93,12 +93,14 @@ export function DashboardPage() {
         },
     })
 
-    const update = useMutation({
-        mutationFn: () => api.post('/api/xkeen/update'),
-        onSettled: () => {
-            qc.invalidateQueries({ queryKey: ['subscription'] })
-            qc.invalidateQueries({ queryKey: ['servers'] })
-        },
+    const start = useMutation({
+        mutationFn: () => api.post('/api/xkeen/start'),
+        onSettled: () => qc.invalidateQueries({ queryKey: ['status'] }),
+    })
+
+    const stop = useMutation({
+        mutationFn: () => api.post('/api/xkeen/stop'),
+        onSettled: () => qc.invalidateQueries({ queryKey: ['status'] }),
     })
 
     const setCountry = useMutation({
@@ -134,11 +136,7 @@ export function DashboardPage() {
                 <div className='max-w-6xl mx-auto px-4 py-3 flex items-center justify-between'>
                     <div>
                         <h1 className='text-lg font-bold flex items-center gap-2'>
-                            <img
-                                src='/favicon.svg'
-                                alt=''
-                                className='size-6'
-                            />
+                            <img src='/favicon.svg' alt='' className='size-6' />
                             XKeen Panel
                         </h1>
                         <div className='flex items-center gap-3 mt-0.5'>
@@ -175,14 +173,20 @@ export function DashboardPage() {
                         />
                         <Controls
                             watchdogActive={s?.watchdog_active ?? false}
+                            coreRunning={s?.xray_running ?? false}
                             onRestart={() => restart.mutate()}
-                            onUpdate={() => update.mutate()}
+                            onStart={() => start.mutate()}
+                            onStop={() => stop.mutate()}
+                            onSelfTest={() =>
+                                api.post<SelfTestResult>('/api/xkeen/selftest')
+                            }
                             onToggleWatchdog={active =>
                                 toggleWatchdog.mutate(active)
                             }
                             loading={
                                 restart.isPending ||
-                                update.isPending ||
+                                start.isPending ||
+                                stop.isPending ||
                                 restarting
                             }
                         />

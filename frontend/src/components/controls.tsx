@@ -3,30 +3,63 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
-import { IconRefresh, IconPlayerPlay } from '@tabler/icons-react'
+import {
+    IconPlayerPlay,
+    IconPlayerStop,
+    IconRefresh,
+    IconStethoscope,
+} from '@tabler/icons-react'
+import type { SelfTestResult } from '@/types'
 
 export function Controls({
     watchdogActive,
+    coreRunning,
     onRestart,
-    onUpdate,
+    onStart,
+    onStop,
+    onSelfTest,
     onToggleWatchdog,
     loading,
 }: {
     watchdogActive: boolean
+    coreRunning: boolean
     onRestart: () => void
-    onUpdate: () => void
+    onStart: () => void
+    onStop: () => void
+    onSelfTest: () => Promise<SelfTestResult>
     onToggleWatchdog: (active: boolean) => void
     loading: boolean
 }) {
-    const [confirming, setConfirming] = useState(false)
+    const [confirming, setConfirming] = useState<'restart' | 'stop' | null>(
+        null,
+    )
+    const [testing, setTesting] = useState(false)
+    const [testResult, setTestResult] = useState<SelfTestResult | null>(null)
 
-    const handleRestart = () => {
-        if (confirming) {
-            onRestart()
-            setConfirming(false)
+    const confirm = (action: 'restart' | 'stop', run: () => void) => {
+        if (confirming === action) {
+            run()
+            setConfirming(null)
         } else {
-            setConfirming(true)
-            setTimeout(() => setConfirming(false), 3000)
+            setConfirming(action)
+            setTimeout(() => setConfirming(null), 3000)
+        }
+    }
+
+    const handleSelfTest = async () => {
+        setTesting(true)
+        setTestResult(null)
+        try {
+            setTestResult(await onSelfTest())
+        } catch (e) {
+            setTestResult({
+                success: false,
+                core: '',
+                output: '',
+                error: e instanceof Error ? e.message : 'ошибка проверки',
+            })
+        } finally {
+            setTesting(false)
         }
     }
 
@@ -37,26 +70,68 @@ export function Controls({
             </CardHeader>
             <CardContent className='space-y-3'>
                 <Button
-                    variant={confirming ? 'destructive' : 'outline'}
+                    variant={
+                        confirming === 'restart' ? 'destructive' : 'outline'
+                    }
                     className='w-full'
-                    onClick={handleRestart}
+                    onClick={() => confirm('restart', onRestart)}
                     disabled={loading}
                 >
-                    <IconPlayerPlay className='size-4' />
-                    {confirming
+                    <IconRefresh className='size-4' />
+                    {confirming === 'restart'
                         ? 'Подтвердить перезапуск'
                         : 'Перезапустить XKeen'}
                 </Button>
 
+                {coreRunning ? (
+                    <Button
+                        variant={
+                            confirming === 'stop' ? 'destructive' : 'outline'
+                        }
+                        className='w-full'
+                        onClick={() => confirm('stop', onStop)}
+                        disabled={loading}
+                    >
+                        <IconPlayerStop className='size-4' />
+                        {confirming === 'stop'
+                            ? 'Подтвердить остановку'
+                            : 'Остановить'}
+                    </Button>
+                ) : (
+                    <Button
+                        variant='outline'
+                        className='w-full'
+                        onClick={onStart}
+                        disabled={loading}
+                    >
+                        <IconPlayerPlay className='size-4' />
+                        Запустить
+                    </Button>
+                )}
+
                 <Button
                     variant='outline'
                     className='w-full'
-                    onClick={onUpdate}
-                    disabled={loading}
+                    onClick={handleSelfTest}
+                    disabled={loading || testing}
                 >
-                    <IconRefresh className='size-4' />
-                    Обновить подписку (CLI)
+                    <IconStethoscope className='size-4' />
+                    {testing ? 'Проверка...' : 'Проверить конфигурацию'}
                 </Button>
+
+                {testResult && (
+                    <p
+                        className={`text-xs whitespace-pre-wrap ${
+                            testResult.success
+                                ? 'text-emerald-400'
+                                : 'text-red-400'
+                        }`}
+                    >
+                        {testResult.success
+                            ? `Конфигурация ${testResult.core} корректна`
+                            : testResult.output || testResult.error}
+                    </p>
+                )}
 
                 <div className='flex items-center justify-between pt-1'>
                     <Label htmlFor='watchdog-toggle'>Watchdog</Label>
