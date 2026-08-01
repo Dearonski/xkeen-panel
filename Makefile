@@ -46,9 +46,14 @@ deploy-disk: build-arm64
 	@test -f $(ROUTER_DISK)/etc/xkeen-panel/config.yaml || cp config.yaml $(ROUTER_DISK)/etc/xkeen-panel/config.yaml
 	@echo "Deployed to router disk"
 
+ROUTER_SSH ?= root@192.168.1.1
+
+# Конфиг не копируется: на роутере в нём живут webauthn_rp_id и прочие
+# настройки установки, которые затирать нельзя
 deploy-ssh: build-arm64
-	scp build/xkeen-panel-aarch64 root@192.168.1.1:/opt/sbin/xkeen-panel
-	scp config.yaml root@192.168.1.1:/opt/etc/xkeen-panel/config.yaml
+	ssh $(ROUTER_SSH) '/opt/etc/init.d/S99xkeen-panel stop' || true
+	scp build/xkeen-panel-aarch64 $(ROUTER_SSH):/opt/sbin/xkeen-panel
+	ssh $(ROUTER_SSH) 'chmod +x /opt/sbin/xkeen-panel && /opt/etc/init.d/S99xkeen-panel start'
 
 clean:
 	rm -rf build/
