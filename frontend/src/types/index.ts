@@ -38,6 +38,15 @@ export type PoolStatus = {
     api_available?: boolean
 }
 
+export type PoolSyncResult = {
+    success: boolean
+    changed: boolean
+    added?: string[]
+    removed?: string[]
+    live: boolean
+    restarting: boolean
+}
+
 export type SettingsResponse = {
     path: string
     settings: Record<string, any>

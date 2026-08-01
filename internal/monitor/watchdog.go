@@ -244,35 +244,30 @@ func (w *Watchdog) handlePoolFailover(reason string, top xkeen.Topology) {
 	}
 
 	servers := w.subscription.GetServers()
-	matches, err := xkeen.PoolMatchesSubscription(w.config.OutboundsFile, servers, selector)
+	state := xkeen.PoolState{BalancerTag: top.BalancerTag, Selector: selector}
+
+	result, err := xkeen.RefreshPool(w.detector.Runtime(), w.config.OutboundsFile, w.config.XrayAPIAddr, servers, state)
 	if err != nil {
-		w.writeLog("[ERROR] Не удалось сверить пул с подпиской: %v", err)
+		w.writeLog("[ERROR] Пул не синхронизирован: %v", err)
 		return
 	}
-	if matches {
+	if !result.Changed {
 		w.writeLog("[POOL] Пул совпадает с подпиской — конфиг не трогаем")
 		return
 	}
 
-	rt := w.detector.Runtime()
-	state := xkeen.PoolState{BalancerTag: top.BalancerTag, Selector: selector}
-	if err := xkeen.SyncPool(rt, w.config.OutboundsFile, servers, state); err != nil {
-		w.writeLog("[ERROR] Пул не синхронизирован: %v", err)
-		return
-	}
 	w.detector.InvalidateTopology()
-
-	if output, err := xkeen.Restart(rt.Dispatcher); err != nil {
-		w.writeLog("[ERROR] Ошибка перезапуска: %v (%s)", err, output)
-		return
-	}
 
 	w.mu.Lock()
 	w.failCount = 0
 	w.latencyHigh = 0
 	w.mu.Unlock()
 
-	w.writeLog("[POOL] Пул приведён к подписке (%d нод), ядро перезапущено", len(servers))
+	how := "с перезапуском ядра"
+	if result.Live {
+		how = "без перезапуска"
+	}
+	w.writeLog("[POOL] Пул приведён к подписке: +%d, -%d (%s)", len(result.Added), len(result.Removed), how)
 }
 
 // selectBest picks the lowest-latency live server, skipping the current one,

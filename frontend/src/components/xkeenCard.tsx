@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { IconArrowsShuffle, IconRefresh } from '@tabler/icons-react'
-import type { PoolStatus, Status } from '@/types'
+import type { PoolStatus, PoolSyncResult, Status } from '@/types'
 
 export function XKeenCard({
     status,
@@ -12,6 +12,7 @@ export function XKeenCard({
     onDisablePool,
     onSyncPool,
     onSyncMihomo,
+    lastSync,
     loading,
 }: {
     status: Status | undefined
@@ -20,6 +21,7 @@ export function XKeenCard({
     onDisablePool: () => void
     onSyncPool: () => void
     onSyncMihomo: () => void
+    lastSync: PoolSyncResult | undefined
     loading: boolean
 }) {
     const [confirming, setConfirming] = useState(false)
@@ -104,6 +106,17 @@ export function XKeenCard({
                             <IconRefresh className='size-4' />
                             Синхронизировать пул с подпиской
                         </Button>
+                        {lastSync && (
+                            <p className='text-xs text-muted-foreground'>
+                                {lastSync.changed
+                                    ? `Пул обновлён: +${lastSync.added?.length ?? 0}, −${lastSync.removed?.length ?? 0}${
+                                          lastSync.live
+                                              ? ' (без перезапуска)'
+                                              : ' (с перезапуском)'
+                                      }`
+                                    : 'Пул уже совпадает с подпиской'}
+                            </p>
+                        )}
                         <Button
                             variant='outline'
                             className='w-full'

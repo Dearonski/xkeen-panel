@@ -19,6 +19,7 @@ import type {
     Server,
     SelfTestResult,
     PoolStatus,
+    PoolSyncResult,
 } from '@/types'
 
 export function DashboardPage() {
@@ -118,7 +119,7 @@ export function DashboardPage() {
 
     const poolAction = useMutation({
         mutationFn: (action: 'enable' | 'disable' | 'sync') =>
-            api.post(`/api/pool/${action}`),
+            api.post<PoolSyncResult>(`/api/pool/${action}`),
         onMutate: () => {
             qc.setQueryData<Status>(['status'], old =>
                 old ? { ...old, restarting: true } : old,
@@ -234,6 +235,7 @@ export function DashboardPage() {
                             onDisablePool={() => poolAction.mutate('disable')}
                             onSyncPool={() => poolAction.mutate('sync')}
                             onSyncMihomo={() => syncMihomo.mutate()}
+                            lastSync={poolAction.data}
                             loading={
                                 poolAction.isPending ||
                                 syncMihomo.isPending ||

@@ -63,10 +63,17 @@ func (h *Handlers) HandleUpdateSubscription(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	resp := map[string]interface{}{
 		"server_count": len(servers),
 		"servers":      servers,
-	})
+	}
+	if sync, err := h.refreshPool(servers); err != nil {
+		resp["pool_error"] = err.Error()
+	} else if sync.Changed {
+		resp["pool"] = sync
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // HandleRefreshSubscription — POST /api/subscription/refresh
@@ -77,10 +84,45 @@ func (h *Handlers) HandleRefreshSubscription(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	resp := map[string]interface{}{
 		"server_count": len(servers),
 		"servers":      servers,
-	})
+	}
+	if sync, err := h.refreshPool(servers); err != nil {
+		resp["pool_error"] = err.Error()
+	} else if sync.Changed {
+		resp["pool"] = sync
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// refreshPool приводит пул к обновлённой подписке. Пул генерируется из URI
+// подписки, поэтому смена сервера у провайдера оставляет в нём мёртвый адрес —
+// и если протухли все ноды, балансировщику не из чего выбирать.
+func (h *Handlers) refreshPool(servers []models.Server) (xkeen.SyncResult, error) {
+	top := h.detector.Topology()
+	if top.Mode != xkeen.TopologyPool {
+		return xkeen.SyncResult{}, nil
+	}
+
+	state := h.pool.Get()
+	state.BalancerTag = top.BalancerTag
+	if len(top.Selectors) > 0 {
+		state.Selector = top.Selectors[0]
+	}
+
+	result, err := xkeen.RefreshPool(h.detector.Runtime(), h.config.OutboundsFile, h.config.XrayAPIAddr, servers, state)
+	if err != nil {
+		log.Printf("[POOL] Синхронизация с подпиской не выполнена: %v", err)
+		return result, err
+	}
+	if result.Changed {
+		h.detector.InvalidateTopology()
+		log.Printf("[POOL] Пул синхронизирован: +%d, -%d, без перезапуска=%v", len(result.Added), len(result.Removed), result.Live)
+	}
+
+	return result, nil
 }
 
 // HandleGetServers — GET /api/servers
@@ -461,19 +503,23 @@ func (h *Handlers) HandlePoolSync(w http.ResponseWriter, r *http.Request) {
 		state.Selector = xkeen.DefaultPoolSelector
 	}
 
-	if err := xkeen.SyncPool(rt, h.config.OutboundsFile, h.subscription.GetServers(), state); err != nil {
+	result, err := xkeen.RefreshPool(rt, h.config.OutboundsFile, h.config.XrayAPIAddr, h.subscription.GetServers(), state)
+	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	h.detector.InvalidateTopology()
+	if result.Changed {
+		h.detector.InvalidateTopology()
+	}
 
-	go func() {
-		if _, err := xkeen.Restart(rt.Dispatcher); err != nil {
-			log.Printf("[POOL] Ошибка рестарта: %v", err)
-		}
-	}()
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "restarting": true})
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":    true,
+		"changed":    result.Changed,
+		"added":      result.Added,
+		"removed":    result.Removed,
+		"live":       result.Live,
+		"restarting": result.Restarted,
+	})
 }
 
 // HandleGetSettings — GET /api/xkeen/settings (contents of xkeen.json)

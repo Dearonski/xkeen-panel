@@ -2,6 +2,7 @@ package xkeen
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,7 +19,9 @@ const (
 	DefaultBalancerTag  = "balancer"
 	DefaultPoolSelector = "sub-"
 	defaultProbeURL     = "https://www.google.com/generate_204"
-	defaultProbeEvery   = "5m"
+	// A dead node stays selectable until the next probe, so this is how long a
+	// pool can keep sending traffic into a hole
+	defaultProbeEvery = "1m"
 )
 
 // BuildPoolOutbounds renders one outbound per server, tagged <selector><N>.
@@ -134,6 +137,11 @@ func balancerBlock(tag, selector string) map[string]interface{} {
 	}
 }
 
+// apiServices are the gRPC services the panel needs: RoutingService pins a
+// balancer node, HandlerService swaps outbounds in a running core so a pool can
+// be refreshed without dropping connections.
+var apiServices = []interface{}{"RoutingService", "HandlerService"}
+
 // apiConfigDoc builds the gRPC API config that OverrideBalancerTarget needs.
 //
 // In the fork this block is installed by `xkeen -sb on`, which only exists on
@@ -152,7 +160,7 @@ func apiConfigDoc(apiAddr string) (map[string]interface{}, error) {
 	return map[string]interface{}{
 		"api": map[string]interface{}{
 			"tag":      "api",
-			"services": []interface{}{"RoutingService"},
+			"services": apiServices,
 		},
 		"inbounds": []interface{}{
 			map[string]interface{}{
@@ -197,6 +205,53 @@ func observatoryBlock(selector string) map[string]interface{} {
 		"probeURL":        defaultProbeURL,
 		"probeInterval":   defaultProbeEvery,
 	}
+}
+
+// AddOutbounds installs outbounds into the running core through the gRPC API,
+// so a pool can be updated without a restart. Requires HandlerService in the api
+// block; callers must be ready to fall back to a restart.
+func AddOutbounds(rt Runtime, apiAddr string, outbounds []interface{}) error {
+	if len(outbounds) == 0 {
+		return nil
+	}
+
+	data, err := json.MarshalIndent(map[string]interface{}{"outbounds": outbounds}, "", "  ")
+	if err != nil {
+		return fmt.Errorf("ошибка сериализации outbound'ов: %w", err)
+	}
+
+	file, err := os.CreateTemp("", "xkeen-panel-outbounds-*.json")
+	if err != nil {
+		return fmt.Errorf("не удалось создать временный файл: %w", err)
+	}
+	defer os.Remove(file.Name())
+
+	if _, err := file.Write(data); err != nil {
+		file.Close()
+		return fmt.Errorf("ошибка записи %s: %w", file.Name(), err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("ошибка закрытия %s: %w", file.Name(), err)
+	}
+
+	if _, err := xrayAPI(rt, "ado", "-s", apiAddr, file.Name()); err != nil {
+		return fmt.Errorf("не удалось добавить outbound'ы через api: %w", err)
+	}
+
+	return nil
+}
+
+// RemoveOutbounds drops outbounds from the running core by tag.
+func RemoveOutbounds(rt Runtime, apiAddr string, tags []string) error {
+	if len(tags) == 0 {
+		return nil
+	}
+
+	if _, err := xrayAPI(rt, append([]string{"rmo", "-s", apiAddr}, tags...)...); err != nil {
+		return fmt.Errorf("не удалось удалить outbound'ы через api: %w", err)
+	}
+
+	return nil
 }
 
 // OverrideBalancerTarget pins the balancer to one node through the gRPC API.
