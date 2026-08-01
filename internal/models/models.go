@@ -38,6 +38,9 @@ type Config struct {
 	// Automatic subscription refresh
 	SubscriptionRefreshInterval int `yaml:"subscription_refresh_interval"`
 
+	// Cap on pool size: every node is probed by observatory separately
+	PoolMaxNodes int `yaml:"pool_max_nodes"`
+
 	// Countries to avoid when switching automatically
 	GeoIPPath                string   `yaml:"geoip_path"`
 	AutoSwitchAvoidCountries []string `yaml:"auto_switch_avoid_countries"`

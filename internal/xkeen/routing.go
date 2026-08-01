@@ -101,7 +101,7 @@ func retargetRules(routing map[string]interface{}, from, to string, toBalancer b
 }
 
 // enableBalancerRouting installs the balancer and points the proxy rules at it.
-func enableBalancerRouting(doc *routingDoc, balancerTag, selector string, proxyTags []string) error {
+func enableBalancerRouting(doc *routingDoc, balancerTag, selector string, proxyTags []string, nodes int) error {
 	changed := 0
 	for _, tag := range proxyTags {
 		changed += retargetRules(doc.routing, tag, balancerTag, true)
@@ -128,7 +128,7 @@ func enableBalancerRouting(doc *routingDoc, balancerTag, selector string, proxyT
 
 	// observatory is a top-level key, not part of routing
 	if _, exists := doc.config["observatory"]; !exists {
-		doc.config["observatory"] = observatoryBlock(selector)
+		doc.config["observatory"] = observatoryBlock(selector, nodes)
 	}
 
 	doc.config["routing"] = doc.routing

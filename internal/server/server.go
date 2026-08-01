@@ -9,6 +9,7 @@ import (
 	"time"
 	"xkeen-panel/internal/api"
 	"xkeen-panel/internal/auth"
+	"xkeen-panel/internal/geoip"
 	"xkeen-panel/internal/models"
 	"xkeen-panel/internal/monitor"
 	"xkeen-panel/internal/sse"
@@ -25,11 +26,12 @@ type Server struct {
 	watchdog     *monitor.Watchdog
 	detector     *xkeen.Detector
 	pool         *xkeen.PoolStore
+	geoip        *geoip.Matcher
 	eventBus     *sse.EventBus
 	frontendFS   fs.FS
 }
 
-func New(cfg *models.Config, um *auth.UserManager, sub *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, pool *xkeen.PoolStore, bus *sse.EventBus, frontendFS fs.FS) *Server {
+func New(cfg *models.Config, um *auth.UserManager, sub *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, pool *xkeen.PoolStore, matcher *geoip.Matcher, bus *sse.EventBus, frontendFS fs.FS) *Server {
 	return &Server{
 		config:       cfg,
 		userManager:  um,
@@ -37,6 +39,7 @@ func New(cfg *models.Config, um *auth.UserManager, sub *xkeen.SubscriptionManage
 		watchdog:     wd,
 		detector:     det,
 		pool:         pool,
+		geoip:        matcher,
 		eventBus:     bus,
 		frontendFS:   frontendFS,
 	}
@@ -55,7 +58,7 @@ func (s *Server) Handler() http.Handler {
 	// Handlers
 	authHandler := api.NewAuthHandler(s.userManager, rateLimiter, s.config)
 	webAuthnHandler := api.NewWebAuthnHandler(s.userManager, rateLimiter, s.config)
-	handlers := api.NewHandlers(s.config, s.subscription, s.watchdog, s.detector, s.pool)
+	handlers := api.NewHandlers(s.config, s.subscription, s.watchdog, s.detector, s.pool, s.geoip)
 
 	// API routes
 	r.Route("/api", func(r chi.Router) {

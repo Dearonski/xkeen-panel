@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"time"
+	"xkeen-panel/internal/geoip"
 	"xkeen-panel/internal/mihomo"
 	"xkeen-panel/internal/models"
 	"xkeen-panel/internal/monitor"
@@ -22,10 +23,11 @@ type Handlers struct {
 	watchdog     *monitor.Watchdog
 	detector     *xkeen.Detector
 	pool         *xkeen.PoolStore
+	geoip        *geoip.Matcher
 }
 
-func NewHandlers(cfg *models.Config, sub *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, pool *xkeen.PoolStore) *Handlers {
-	return &Handlers{config: cfg, subscription: sub, watchdog: wd, detector: det, pool: pool}
+func NewHandlers(cfg *models.Config, sub *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, pool *xkeen.PoolStore, matcher *geoip.Matcher) *Handlers {
+	return &Handlers{config: cfg, subscription: sub, watchdog: wd, detector: det, pool: pool, geoip: matcher}
 }
 
 // HandleStatus — GET /api/status
@@ -112,7 +114,8 @@ func (h *Handlers) refreshPool(servers []models.Server) (xkeen.SyncResult, error
 		state.Selector = top.Selectors[0]
 	}
 
-	result, err := xkeen.RefreshPool(h.detector.Runtime(), h.config.OutboundsFile, h.config.XrayAPIAddr, servers, state)
+	result, err := xkeen.RefreshPool(h.detector.Runtime(), h.config.OutboundsFile, h.config.XrayAPIAddr, servers, state,
+		xkeen.PoolSelectionFromConfig(h.config, h.geoip))
 	if err != nil {
 		log.Printf("[POOL] Синхронизация с подпиской не выполнена: %v", err)
 		return result, err
@@ -442,7 +445,10 @@ func (h *Handlers) HandlePoolEnable(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rt := h.detector.Runtime()
-	state, err := xkeen.EnablePool(rt, h.config.OutboundsFile, servers, xkeen.PoolOptions{APIAddr: h.config.XrayAPIAddr})
+	state, err := xkeen.EnablePool(rt, h.config.OutboundsFile, servers, xkeen.PoolOptions{
+		APIAddr:   h.config.XrayAPIAddr,
+		Selection: xkeen.PoolSelectionFromConfig(h.config, h.geoip),
+	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -503,7 +509,8 @@ func (h *Handlers) HandlePoolSync(w http.ResponseWriter, r *http.Request) {
 		state.Selector = xkeen.DefaultPoolSelector
 	}
 
-	result, err := xkeen.RefreshPool(rt, h.config.OutboundsFile, h.config.XrayAPIAddr, h.subscription.GetServers(), state)
+	result, err := xkeen.RefreshPool(rt, h.config.OutboundsFile, h.config.XrayAPIAddr, h.subscription.GetServers(), state,
+		xkeen.PoolSelectionFromConfig(h.config, h.geoip))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

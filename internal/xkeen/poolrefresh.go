@@ -29,7 +29,7 @@ type SyncResult struct {
 // The new set is applied through the core API when possible (no restart at all)
 // and falls back to restarting when the API is unavailable — the api block only
 // exists if the panel or `xkeen -sb on` installed it.
-func RefreshPool(rt Runtime, outboundsPath, apiAddr string, servers []models.Server, state PoolState) (SyncResult, error) {
+func RefreshPool(rt Runtime, outboundsPath, apiAddr string, servers []models.Server, state PoolState, sel PoolSelection) (SyncResult, error) {
 	result := SyncResult{}
 
 	selector := state.Selector
@@ -37,7 +37,9 @@ func RefreshPool(rt Runtime, outboundsPath, apiAddr string, servers []models.Ser
 		selector = DefaultPoolSelector
 	}
 
-	matches, err := PoolMatchesSubscription(outboundsPath, servers, selector)
+	wanted := SelectPoolServers(servers, sel)
+
+	matches, err := PoolMatchesSubscription(outboundsPath, wanted, selector)
 	if err != nil {
 		return result, err
 	}
@@ -50,7 +52,7 @@ func RefreshPool(rt Runtime, outboundsPath, apiAddr string, servers []models.Ser
 		return result, err
 	}
 
-	if err := SyncPool(rt, outboundsPath, servers, state); err != nil {
+	if err := SyncPool(rt, outboundsPath, wanted, state, PoolSelection{MaxNodes: len(wanted)}); err != nil {
 		return result, err
 	}
 
@@ -73,6 +75,14 @@ func RefreshPool(rt Runtime, outboundsPath, apiAddr string, servers []models.Ser
 		log.Printf("[POOL] В api-блок добавлен HandlerService — применяю перезапуском")
 	}
 
+	// Probe load scales with pool size, so a pool that shrank or grew may need a
+	// different interval. This lives in the routing file, which the API cannot
+	// reload — changing it forces the restart path.
+	observatoryChanged, err := updateObservatoryInterval(rt, selector, len(wanted))
+	if err != nil {
+		log.Printf("[POOL] Не удалось обновить observatory: %v", err)
+	}
+
 	// Tags are positional (sub-1, sub-2, …), so a server swapped in place keeps
 	// its tag while its endpoint changes. Such a node has to be replaced in the
 	// running core too, or it would keep the old address until the next restart.
@@ -81,7 +91,7 @@ func RefreshPool(rt Runtime, outboundsPath, apiAddr string, servers []models.Ser
 	// The live path is attempted only for an api block the panel wrote, because
 	// only then is HandlerService guaranteed present. Otherwise the removals
 	// would land and the additions would fail, leaving the core with no nodes.
-	if !upgraded && state.APIFile != "" {
+	if !upgraded && !observatoryChanged && state.APIFile != "" {
 		if err := applyPoolLive(rt, apiAddr, outboundsPath, selector, replaced, result.Removed); err == nil {
 			result.Live = true
 			return result, nil
@@ -96,6 +106,33 @@ func RefreshPool(rt Runtime, outboundsPath, apiAddr string, servers []models.Ser
 	result.Restarted = true
 
 	return result, nil
+}
+
+// updateObservatoryInterval keeps the probe interval in step with pool size.
+func updateObservatoryInterval(rt Runtime, selector string, nodes int) (bool, error) {
+	doc, err := findRoutingDoc(rt, func(map[string]interface{}) bool { return false })
+	if err != nil {
+		return false, err
+	}
+
+	observatory, ok := doc.config["observatory"].(map[string]interface{})
+	if !ok {
+		return false, nil
+	}
+
+	want := probeIntervalFor(nodes)
+	if current, _ := observatory["probeInterval"].(string); current == want {
+		return false, nil
+	}
+
+	observatory["probeInterval"] = want
+	doc.config["observatory"] = observatory
+
+	if err := WriteOutboundsConfig(doc.path, doc.config); err != nil {
+		return false, err
+	}
+
+	return true, nil
 }
 
 // ensureHandlerService adds HandlerService to an api block the panel created.

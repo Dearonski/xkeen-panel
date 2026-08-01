@@ -67,11 +67,13 @@ func main() {
 	watchdog.SetEventBus(eventBus)
 
 	// GeoIP reuses the geoip.dat already installed for Xray
+	var geoMatcher *geoip.Matcher
 	if geoPath := geoip.FindDat(cfg.GeoIPPath); geoPath == "" {
 		log.Printf("GeoIP: geoip.dat не найден (%s) — гео-фильтр по IP отключён, используется определение по имени", cfg.GeoIPPath)
 	} else if matcher, err := geoip.Load(geoPath, cfg.AutoSwitchAvoidCountries); err != nil {
 		log.Printf("GeoIP: ошибка загрузки %s: %v — гео-фильтр по IP отключён", geoPath, err)
 	} else {
+		geoMatcher = matcher
 		watchdog.SetGeoIP(matcher)
 		log.Printf("GeoIP: загружен %s (избегаемые страны: %v)", geoPath, cfg.AutoSwitchAvoidCountries)
 	}
@@ -103,7 +105,7 @@ func main() {
 
 	// Periodic subscription refresh
 	if cfg.SubscriptionRefreshInterval > 0 {
-		go runSubscriptionRefresh(ctx, cfg, subManager, watchdog, detector, poolStore, eventBus)
+		go runSubscriptionRefresh(ctx, cfg, subManager, watchdog, detector, poolStore, geoMatcher, eventBus)
 	}
 
 	// Frontend assets
@@ -116,7 +118,7 @@ func main() {
 	}
 
 	// HTTP server
-	srv := server.New(cfg, userManager, subManager, watchdog, detector, poolStore, eventBus, frontendFS)
+	srv := server.New(cfg, userManager, subManager, watchdog, detector, poolStore, geoMatcher, eventBus, frontendFS)
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Port),
 		Handler: srv.Handler(),
@@ -150,7 +152,7 @@ func main() {
 // runSubscriptionRefresh refreshes the subscription on a timer. The core is
 // restarted only when the active server was actually replaced (it vanished from
 // the subscription) — a refresh must not drop a working connection.
-func runSubscriptionRefresh(ctx context.Context, cfg *models.Config, sm *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, pool *xkeen.PoolStore, bus *sse.EventBus) {
+func runSubscriptionRefresh(ctx context.Context, cfg *models.Config, sm *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, pool *xkeen.PoolStore, matcher *geoip.Matcher, bus *sse.EventBus) {
 	interval := time.Duration(cfg.SubscriptionRefreshInterval) * time.Second
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -200,7 +202,8 @@ func runSubscriptionRefresh(ctx context.Context, cfg *models.Config, sm *xkeen.S
 					state.Selector = top.Selectors[0]
 				}
 
-				res, err := xkeen.RefreshPool(rt, cfg.OutboundsFile, cfg.XrayAPIAddr, sm.GetServers(), state)
+				res, err := xkeen.RefreshPool(rt, cfg.OutboundsFile, cfg.XrayAPIAddr, sm.GetServers(), state,
+					xkeen.PoolSelectionFromConfig(cfg, matcher))
 				switch {
 				case err != nil:
 					log.Printf("[AUTO-UPDATE] Пул не синхронизирован: %v", err)
@@ -273,6 +276,7 @@ func loadConfig(path string) (*models.Config, error) {
 
 		SubscriptionRefreshInterval: 1800,
 
+		PoolMaxNodes:             xkeen.DefaultPoolMaxNodes,
 		GeoIPPath:                "/opt/etc/xray/dat/geoip_v2fly.dat",
 		AutoSwitchAvoidCountries: []string{"RU", "BY"},
 	}

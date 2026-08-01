@@ -25,7 +25,7 @@ func TestRefreshPoolPicksUpRotatedServer(t *testing.T) {
 
 	// No dispatcher in the fixture, so the live path is unavailable and the
 	// restart is a no-op — the file content is what matters here
-	result, err := RefreshPool(rt, outboundsPath, "", rotated, state)
+	result, err := RefreshPool(rt, outboundsPath, "", rotated, state, PoolSelection{})
 	if err != nil {
 		t.Fatalf("RefreshPool: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestRefreshPoolNoopWhenUnchanged(t *testing.T) {
 
 	before, _ := os.ReadFile(outboundsPath)
 
-	result, err := RefreshPool(rt, outboundsPath, "", poolServers(), state)
+	result, err := RefreshPool(rt, outboundsPath, "", poolServers(), state, PoolSelection{})
 	if err != nil {
 		t.Fatalf("RefreshPool: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestRefreshPoolReportsAddedAndRemoved(t *testing.T) {
 		t.Fatalf("EnablePool: %v", err)
 	}
 
-	result, err := RefreshPool(rt, outboundsPath, "", poolServers()[:1], state)
+	result, err := RefreshPool(rt, outboundsPath, "", poolServers()[:1], state, PoolSelection{})
 	if err != nil {
 		t.Fatalf("RefreshPool: %v", err)
 	}

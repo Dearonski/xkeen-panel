@@ -163,7 +163,7 @@ func TestSyncPoolTracksSubscription(t *testing.T) {
 		t.Fatalf("EnablePool: %v", err)
 	}
 
-	if err := SyncPool(rt, outboundsPath, poolServers()[:1], state); err != nil {
+	if err := SyncPool(rt, outboundsPath, poolServers()[:1], state, PoolSelection{}); err != nil {
 		t.Fatalf("SyncPool: %v", err)
 	}
 

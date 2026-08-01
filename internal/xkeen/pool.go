@@ -199,11 +199,26 @@ func splitAPIAddr(addr string) (string, int, error) {
 
 // observatoryBlock enables the probing leastPing needs — without it the strategy
 // has no latency data to rank nodes by.
-func observatoryBlock(selector string) map[string]interface{} {
+//
+// The interval scales with pool size: observatory probes every node separately,
+// so a minute-long cycle over a large pool means constant handshakes on the
+// router.
+func observatoryBlock(selector string, nodes int) map[string]interface{} {
 	return map[string]interface{}{
 		"subjectSelector": []interface{}{selector},
 		"probeURL":        defaultProbeURL,
-		"probeInterval":   defaultProbeEvery,
+		"probeInterval":   probeIntervalFor(nodes),
+	}
+}
+
+func probeIntervalFor(nodes int) string {
+	switch {
+	case nodes <= 20:
+		return defaultProbeEvery
+	case nodes <= 40:
+		return "3m"
+	default:
+		return "5m"
 	}
 }
 

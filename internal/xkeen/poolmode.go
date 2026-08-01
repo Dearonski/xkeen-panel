@@ -19,6 +19,7 @@ type PoolOptions struct {
 	BalancerTag string
 	Selector    string
 	APIAddr     string
+	Selection   PoolSelection
 }
 
 // EnablePool converts a single-upstream config into a balancer pool built from
@@ -58,7 +59,7 @@ func EnablePool(rt Runtime, outboundsPath string, servers []models.Server, opts 
 	}
 	originalTag := outboundTag(template)
 
-	nodes, err := BuildPoolOutbounds(servers, selector, template)
+	nodes, err := BuildPoolOutbounds(SelectPoolServers(servers, opts.Selection), selector, template)
 	if err != nil {
 		return state, err
 	}
@@ -68,7 +69,7 @@ func EnablePool(rt Runtime, outboundsPath string, servers []models.Server, opts 
 	if err != nil {
 		return state, err
 	}
-	if err := enableBalancerRouting(doc, balancerTag, selector, proxyTags); err != nil {
+	if err := enableBalancerRouting(doc, balancerTag, selector, proxyTags, len(nodes)); err != nil {
 		return state, err
 	}
 
@@ -183,7 +184,7 @@ func DisablePool(rt Runtime, outboundsPath string, server *models.Server, state 
 
 // SyncPool refreshes pool membership from the subscription without touching
 // routing — the balancer selects by tag prefix, so the tags stay stable.
-func SyncPool(rt Runtime, outboundsPath string, servers []models.Server, state PoolState) error {
+func SyncPool(rt Runtime, outboundsPath string, servers []models.Server, state PoolState, sel PoolSelection) error {
 	config, err := ReadOutboundsConfig(outboundsPath)
 	if err != nil {
 		return err
@@ -195,7 +196,7 @@ func SyncPool(rt Runtime, outboundsPath string, servers []models.Server, state P
 	}
 
 	_, template := findProxyOutbound(outbounds)
-	nodes, err := BuildPoolOutbounds(servers, state.Selector, template)
+	nodes, err := BuildPoolOutbounds(SelectPoolServers(servers, sel), state.Selector, template)
 	if err != nil {
 		return err
 	}

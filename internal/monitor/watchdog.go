@@ -246,7 +246,8 @@ func (w *Watchdog) handlePoolFailover(reason string, top xkeen.Topology) {
 	servers := w.subscription.GetServers()
 	state := xkeen.PoolState{BalancerTag: top.BalancerTag, Selector: selector}
 
-	result, err := xkeen.RefreshPool(w.detector.Runtime(), w.config.OutboundsFile, w.config.XrayAPIAddr, servers, state)
+	result, err := xkeen.RefreshPool(w.detector.Runtime(), w.config.OutboundsFile, w.config.XrayAPIAddr, servers, state,
+		xkeen.PoolSelectionFromConfig(w.config, w.geoip))
 	if err != nil {
 		w.writeLog("[ERROR] Пул не синхронизирован: %v", err)
 		return

@@ -80,6 +80,9 @@ max_fails: 3
 
 # Лог-файл
 log_file: /opt/var/log/xkeen-panel.log
+
+# Размер пула балансировщика (лучшие по пингу, без стран из списка ниже)
+pool_max_nodes: 10
 YAML
     echo "Конфиг: $INSTALL_DIR/config.yaml"
 else

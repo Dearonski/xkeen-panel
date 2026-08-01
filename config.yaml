@@ -39,6 +39,12 @@ watchdog_auto_start: true       # Включать watchdog автоматиче
 # перезапуска, поэтому интервал можно держать небольшим.
 subscription_refresh_interval: 1800
 
+# Сколько нод держать в пуле балансировщика. Каждую ноду Xray пробует
+# отдельно (observatory), поэтому пул из всей подписки — это постоянные
+# handshake'и на роутере. Панель берёт лучшие по пингу, исключая страны из
+# auto_switch_avoid_countries.
+pool_max_nodes: 10
+
 # === Гео-избегание при автопереключении ===
 # Используем geoip.dat, который уже стоит для Xray
 geoip_path: /opt/etc/xray/dat/geoip_v2fly.dat
