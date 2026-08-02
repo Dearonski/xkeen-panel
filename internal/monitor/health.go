@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -15,11 +16,14 @@ import (
 // A CDN that fronts many sites (CloudFront, Cloudflare) answers 403 to blocked
 // IPs, and Telegram simply stops responding — neither shows up in a
 // generate_204 probe.
+//
+// The endpoints are deliberately small and quick: a probe travels through the
+// VPN, and a heavy page turns a healthy exit into a timeout.
 var DefaultHealthURLs = []string{
-	"https://soundcloud.com",   // CloudFront
-	"https://web.telegram.org", // Telegram
-	"https://www.youtube.com",
-	"https://chatgpt.com", // usually the first to block datacentre ranges
+	"https://www.cloudflare.com/cdn-cgi/trace", // Cloudflare edge, a few lines of text
+	"https://web.telegram.org/",                // Telegram
+	"https://www.youtube.com/generate_204",     // Google, empty 204
+	"https://soundcloud.com/",                  // CloudFront
 }
 
 // healthVerdict is the outcome of one probe.
@@ -123,9 +127,20 @@ func (h *HealthChecker) Failing() []string {
 }
 
 // probeURL fetches a URL and decides whether the answer looks like a block.
+//
+// A network error is retried once: a timeout says far less than a 403 does, and
+// one slow response should not count against the exit node.
 func probeURL(url string, timeout time.Duration) healthVerdict {
+	verdict := probeURLOnce(url, timeout)
+	if verdict.Err != nil {
+		verdict = probeURLOnce(url, timeout)
+	}
+	return verdict
+}
+
+func probeURLOnce(url string, timeout time.Duration) healthVerdict {
 	if timeout <= 0 {
-		timeout = 10 * time.Second
+		timeout = 15 * time.Second
 	}
 
 	client := &http.Client{
@@ -136,18 +151,24 @@ func probeURL(url string, timeout time.Duration) healthVerdict {
 		},
 	}
 
-	req, err := http.NewRequest(http.MethodHead, url, nil)
+	// GET rather than HEAD: plenty of sites answer HEAD slowly or not at all,
+	// and SoundCloud simply hangs on it. The body is drained and dropped.
+	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return healthVerdict{URL: url, Err: err}
 	}
 	// A default Go user agent is itself a reason for some CDNs to answer 403
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; xkeen-panel health check)")
+	req.Header.Set("Accept", "*/*")
 
 	resp, err := client.Do(req)
 	if err != nil {
 		return healthVerdict{URL: url, Err: err}
 	}
-	defer resp.Body.Close()
+	defer func() {
+		io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		resp.Body.Close()
+	}()
 
 	verdict := healthVerdict{URL: url, Status: resp.StatusCode}
 

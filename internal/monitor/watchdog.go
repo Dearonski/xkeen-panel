@@ -16,6 +16,16 @@ import (
 	"xkeen-panel/internal/xkeen"
 )
 
+const (
+	// A probe travels through the VPN and terminates TLS at the far end, so it
+	// needs more room than a plain connectivity check.
+	healthProbeTimeout = 15 * time.Second
+
+	// Minimum gap between exit rotations, so a service that blocks the whole
+	// pool cannot make the panel cycle through it.
+	rotationCooldown = 30 * time.Minute
+)
+
 type Watchdog struct {
 	config       *models.Config
 	subscription *xkeen.SubscriptionManager
@@ -34,10 +44,11 @@ type Watchdog struct {
 	geoip        *geoip.Matcher
 	blacklist    map[string]time.Time // keyed by RawURI, which survives reindexing
 
-	health    *HealthChecker
-	ticks     int
-	badNodes  map[string]time.Time // pool tags an exit check condemned, by expiry
-	poolStore *xkeen.PoolStore
+	health       *HealthChecker
+	ticks        int
+	badNodes     map[string]time.Time // pool tags an exit check condemned, by expiry
+	lastRotation time.Time
+	poolStore    *xkeen.PoolStore
 }
 
 func NewWatchdog(cfg *models.Config, sub *xkeen.SubscriptionManager, det *xkeen.Detector) *Watchdog {
@@ -219,12 +230,21 @@ func (w *Watchdog) superviseExit() {
 		return
 	}
 
-	verdict := w.health.Probe(time.Duration(w.config.ProbeTimeoutMs)*time.Millisecond + 8*time.Second)
+	verdict := w.health.Probe(healthProbeTimeout)
 	if !verdict.OK {
 		w.writeLog("[HEALTH] %s", verdict)
 	}
 
 	if !w.health.ExitLooksBlocked() {
+		return
+	}
+
+	// Some services turn away every datacentre IP, so rotating would never fix
+	// them and the pool would just spin. One rotation per cooldown at most.
+	w.mu.RLock()
+	since := time.Since(w.lastRotation)
+	w.mu.RUnlock()
+	if !w.lastRotation.IsZero() && since < rotationCooldown {
 		return
 	}
 
@@ -254,6 +274,10 @@ func (w *Watchdog) rotateExit(rt xkeen.Runtime, top xkeen.Topology) {
 		w.writeLog("[HEALTH] Не удалось сменить ноду: %v", err)
 		return
 	}
+
+	w.mu.Lock()
+	w.lastRotation = time.Now()
+	w.mu.Unlock()
 
 	w.health.Reset()
 	w.writeLog("[HEALTH] Выход переключён на %s", tag)

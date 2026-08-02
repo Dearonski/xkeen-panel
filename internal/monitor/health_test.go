@@ -174,3 +174,65 @@ func TestNewHealthCheckerDefaults(t *testing.T) {
 		t.Errorf("threshold = %d, want at least 1", checker.threshold)
 	}
 }
+
+// HEAD is what broke the first version: SoundCloud never answers it and the
+// probe timed out on a perfectly healthy exit.
+func TestProbeUsesGET(t *testing.T) {
+	var method string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method = r.Method
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	probeURL(srv.URL, 5*time.Second)
+
+	if method != http.MethodGet {
+		t.Errorf("method = %q, want GET", method)
+	}
+}
+
+// A timeout says far less than a 403 does, so a single slow answer must not
+// count against the exit.
+func TestProbeRetriesNetworkErrorOnce(t *testing.T) {
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			// Hijack and drop the connection to force a network error
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				conn.Close()
+			}
+			return
+		}
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+
+	got := probeURL(srv.URL, 5*time.Second)
+
+	if attempts != 2 {
+		t.Errorf("attempts = %d, want 2 — a network error should be retried", attempts)
+	}
+	if !got.OK {
+		t.Errorf("verdict = %+v, want the retry to succeed", got)
+	}
+}
+
+// A 403 is decisive; retrying it would only double the request rate.
+func TestProbeDoesNotRetryBlocks(t *testing.T) {
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.WriteHeader(403)
+	}))
+	defer srv.Close()
+
+	if got := probeURL(srv.URL, 5*time.Second); !got.Blocked {
+		t.Errorf("verdict = %+v, want blocked", got)
+	}
+	if attempts != 1 {
+		t.Errorf("attempts = %d, want 1 — a block needs no second opinion", attempts)
+	}
+}
