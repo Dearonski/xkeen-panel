@@ -72,7 +72,12 @@ export function XKeenCard({
                             <dt className='text-muted-foreground'>
                                 Активная нода
                             </dt>
-                            <dd>{pool.current_tag}</dd>
+                            <dd>
+                                {pool.current_tag}
+                                {pool.pinned_tag === pool.current_tag
+                                    ? ' (закреплена)'
+                                    : ''}
+                            </dd>
                         </div>
                     )}
                 </dl>
@@ -125,6 +130,15 @@ export function XKeenCard({
                         >
                             Вернуться к одному серверу
                         </Button>
+                        {isPool && pool?.api_available !== false && (
+                            <p className='text-xs text-muted-foreground'>
+                                Трафик идёт через одну ноду — внешний IP не
+                                скачет, поэтому не рвутся сессии Telegram и не
+                                срабатывает защита CDN. Панель периодически
+                                проверяет через неё реальные сервисы и меняет
+                                ноду, если та перестаёт работать.
+                            </p>
+                        )}
                         {pool?.api_available === false && (
                             <p className='text-xs text-amber-400'>
                                 Ручной выбор ноды недоступен: в конфиге Xray нет

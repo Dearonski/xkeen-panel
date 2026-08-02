@@ -65,6 +65,7 @@ func main() {
 	watchdog := monitor.NewWatchdog(cfg, subManager, detector)
 	eventBus := sse.NewEventBus()
 	watchdog.SetEventBus(eventBus)
+	watchdog.SetPoolStore(poolStore)
 
 	// GeoIP reuses the geoip.dat already installed for Xray
 	var geoMatcher *geoip.Matcher
@@ -179,8 +180,7 @@ func runSubscriptionRefresh(ctx context.Context, cfg *models.Config, sm *xkeen.S
 				}
 			}
 			if err != nil {
-				log.Printf("[AUTO-UPDATE] Подписка не обновилась: %v", err)
-				bus.Publish(sse.Event{Type: "log", Data: tsLog("[AUTO-UPDATE] ошибка обновления подписки")})
+				wd.Log("[AUTO-UPDATE] Подписка не обновилась: %v", err)
 				continue
 			}
 
@@ -206,13 +206,10 @@ func runSubscriptionRefresh(ctx context.Context, cfg *models.Config, sm *xkeen.S
 					xkeen.PoolSelectionFromConfig(cfg, matcher))
 				switch {
 				case err != nil:
-					log.Printf("[AUTO-UPDATE] Пул не синхронизирован: %v", err)
-					bus.Publish(sse.Event{Type: "log", Data: tsLog("[AUTO-UPDATE] пул не синхронизирован: " + err.Error())})
+					wd.Log("[AUTO-UPDATE] Пул не синхронизирован: %v", err)
 				case res.Changed:
 					det.InvalidateTopology()
-					log.Printf("[AUTO-UPDATE] Пул обновлён (+%d/-%d, live=%v)", len(res.Added), len(res.Removed), res.Live)
-					bus.Publish(sse.Event{Type: "log", Data: tsLog(fmt.Sprintf(
-						"[AUTO-UPDATE] пул обновлён: +%d, -%d%s", len(res.Added), len(res.Removed), liveSuffix(res)))})
+					wd.Log("[AUTO-UPDATE] Пул обновлён: +%d, -%d%s", len(res.Added), len(res.Removed), liveSuffix(res))
 				}
 			} else if active != nil && newURI != prevURI {
 				// Single-outbound mode: the active server left the subscription.
@@ -229,7 +226,7 @@ func runSubscriptionRefresh(ctx context.Context, cfg *models.Config, sm *xkeen.S
 			}
 
 			bus.Publish(sse.Event{Type: "subscription", Data: map[string]bool{"updated": true}})
-			bus.Publish(sse.Event{Type: "log", Data: tsLog("[AUTO-UPDATE] подписка обновлена")})
+			wd.Log("[AUTO-UPDATE] Подписка обновлена (%d серверов)", len(sm.GetServers()))
 		}
 	}
 }
@@ -243,10 +240,6 @@ func liveSuffix(res xkeen.SyncResult) string {
 		return " (с перезапуском ядра)"
 	}
 	return ""
-}
-
-func tsLog(msg string) string {
-	return time.Now().Format("2006-01-02 15:04:05") + " " + msg
 }
 
 func loadConfig(path string) (*models.Config, error) {
@@ -277,6 +270,9 @@ func loadConfig(path string) (*models.Config, error) {
 		SubscriptionRefreshInterval: 1800,
 
 		PoolMaxNodes:             xkeen.DefaultPoolMaxNodes,
+		HealthCheckURLs:          monitor.DefaultHealthURLs,
+		HealthCheckEvery:         5,
+		HealthFailThreshold:      2,
 		GeoIPPath:                "/opt/etc/xray/dat/geoip_v2fly.dat",
 		AutoSwitchAvoidCountries: []string{"RU", "BY"},
 	}

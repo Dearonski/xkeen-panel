@@ -45,6 +45,16 @@ subscription_refresh_interval: 1800
 # auto_switch_avoid_countries.
 pool_max_nodes: 10
 
+# Трафик закрепляется за одной нодой пула: балансировщик выбирает outbound на
+# каждое соединение, из-за чего внешний IP скачет — и рвутся сессии Telegram,
+# а CDN отвечает 403. Панель проверяет через активную ноду реальные сервисы и
+# меняет её, если через неё перестаёт работать несколько из них.
+health_check_every: 5           # раз в сколько циклов watchdog делать проверку
+health_fail_threshold: 2        # неудач одного сервиса подряд, чтобы счесть его битым
+# health_check_urls:            # по умолчанию: soundcloud, telegram, youtube, chatgpt
+#   - https://soundcloud.com
+#   - https://web.telegram.org
+
 # === Гео-избегание при автопереключении ===
 # Используем geoip.dat, который уже стоит для Xray
 geoip_path: /opt/etc/xray/dat/geoip_v2fly.dat

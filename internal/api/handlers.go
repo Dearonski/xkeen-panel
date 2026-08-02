@@ -188,7 +188,7 @@ func (h *Handlers) HandleSelectServer(w http.ResponseWriter, r *http.Request) {
 	// In pool mode the balancer picks the node, so a manual choice is an override
 	// through the core API: instant, no restart
 	if top := h.detector.Topology(); top.Mode == xkeen.TopologyPool {
-		if err := h.pinPoolNode(rt, top, req.ID); err != nil {
+		if err := h.pinPoolNode(rt, top, server); err != nil {
 			log.Printf("[SELECT] Ошибка закрепления ноды: %v", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -227,14 +227,34 @@ func (h *Handlers) HandleSelectServer(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// pinPoolNode pins a pool node through `xray api bo`. A server's position in the
-// subscription matches its node number — the pool is built from the same list.
-func (h *Handlers) pinPoolNode(rt xkeen.Runtime, top xkeen.Topology, serverID int) error {
-	if serverID < 0 || serverID >= len(top.PoolTags) {
-		return fmt.Errorf("нода для сервера %d не найдена в пуле — обновите пул из подписки", serverID)
+// pinPoolNode pins the pool node that carries the chosen server.
+//
+// The node is matched by endpoint, not by position: the pool holds only the best
+// `pool_max_nodes` of the subscription, so a subscription index says nothing
+// about which node — if any — serves that server.
+func (h *Handlers) pinPoolNode(rt xkeen.Runtime, top xkeen.Topology, server *models.Server) error {
+	selector := xkeen.DefaultPoolSelector
+	if len(top.Selectors) > 0 {
+		selector = top.Selectors[0]
 	}
 
-	tag := top.PoolTags[serverID]
+	nodes, err := xkeen.PoolNodes(h.config.OutboundsFile, selector, []models.Server{*server})
+	if err != nil {
+		return err
+	}
+
+	tag := ""
+	for _, node := range nodes {
+		if node.Server != nil {
+			tag = node.Tag
+			break
+		}
+	}
+	if tag == "" {
+		return fmt.Errorf("сервер %q не входит в пул (в нём %d лучших нод) — выберите один из них или пересоберите пул",
+			server.Name, len(nodes))
+	}
+
 	if err := xkeen.OverrideBalancerTarget(rt, h.config.XrayAPIAddr, top.BalancerTag, tag); err != nil {
 		return fmt.Errorf("%w. Закрепление ноды требует блок api в конфиге Xray — его добавляет `xkeen -sb on`", err)
 	}
@@ -462,7 +482,9 @@ func (h *Handlers) HandlePoolEnable(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		if _, err := xkeen.Restart(rt.Dispatcher); err != nil {
 			log.Printf("[POOL] Ошибка рестарта: %v", err)
+			return
 		}
+		h.pinAfterRestart(rt)
 	}()
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -470,6 +492,40 @@ func (h *Handlers) HandlePoolEnable(w http.ResponseWriter, r *http.Request) {
 		"balancer_tag": state.BalancerTag,
 		"restarting":   true,
 	})
+}
+
+// pinAfterRestart waits for the core to come back and pins one node.
+//
+// A fresh pool selects an outbound per connection, so the outgoing IP moves
+// between nodes and anything IP-bound — Telegram sessions, CDN anti-abuse —
+// breaks. Pinning right after the restart avoids a window of that behaviour
+// before the watchdog's next tick.
+func (h *Handlers) pinAfterRestart(rt xkeen.Runtime) {
+	deadline := time.Now().Add(90 * time.Second)
+	for xkeen.IsRestarting() && time.Now().Before(deadline) {
+		time.Sleep(time.Second)
+	}
+	// The core needs a moment past process start before its API answers
+	time.Sleep(3 * time.Second)
+
+	h.detector.InvalidateTopology()
+	top := h.detector.Topology()
+	if top.Mode != xkeen.TopologyPool {
+		return
+	}
+
+	tag, err := xkeen.PinBestNode(rt, h.config.XrayAPIAddr, h.config.OutboundsFile, top,
+		h.subscription.GetServers(), nil,
+		time.Duration(h.config.ProbeTimeoutMs)*time.Millisecond, h.config.ProbeConcurrency)
+	if err != nil {
+		h.watchdog.Log("[PIN] Не удалось закрепить ноду: %v", err)
+		return
+	}
+
+	if err := h.pool.SetPinned(tag); err != nil {
+		log.Printf("[PIN] Не удалось сохранить закрепление: %v", err)
+	}
+	h.watchdog.Log("[PIN] Трафик закреплён за нодой %s", tag)
 }
 
 // HandlePoolDisable — POST /api/pool/disable. Returns the config to a single

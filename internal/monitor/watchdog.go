@@ -33,6 +33,11 @@ type Watchdog struct {
 	eventBus     *sse.EventBus
 	geoip        *geoip.Matcher
 	blacklist    map[string]time.Time // keyed by RawURI, which survives reindexing
+
+	health    *HealthChecker
+	ticks     int
+	badNodes  map[string]time.Time // pool tags an exit check condemned, by expiry
+	poolStore *xkeen.PoolStore
 }
 
 func NewWatchdog(cfg *models.Config, sub *xkeen.SubscriptionManager, det *xkeen.Detector) *Watchdog {
@@ -44,7 +49,15 @@ func NewWatchdog(cfg *models.Config, sub *xkeen.SubscriptionManager, det *xkeen.
 		startTime:    time.Now(),
 		lastLatency:  -1,
 		blacklist:    make(map[string]time.Time),
+		badNodes:     make(map[string]time.Time),
+		health:       NewHealthChecker(cfg.HealthCheckURLs, cfg.HealthFailThreshold),
 	}
+}
+
+// SetPoolStore wires the store holding the pinned node, so a pin survives an
+// Xray restart — the balancer override lives only in the core's memory.
+func (w *Watchdog) SetPoolStore(store *xkeen.PoolStore) {
+	w.poolStore = store
 }
 
 // SetEventBus wires the SSE event bus.
@@ -164,7 +177,121 @@ func (w *Watchdog) check() {
 
 	if proactive {
 		w.handleFailover(fmt.Sprintf("высокий пинг %dms подряд", latency))
+		return
 	}
+
+	w.superviseExit()
+}
+
+// superviseExit keeps the pinned node in place and watches whether traffic
+// through it actually reaches real services.
+//
+// Connectivity alone is not enough: an exit whose IP a CDN blocks answers
+// generate_204 happily while SoundCloud returns 403 and Telegram never loads.
+func (w *Watchdog) superviseExit() {
+	top := w.detector.Topology()
+	if top.Mode != xkeen.TopologyPool {
+		return
+	}
+
+	rt := w.detector.Runtime()
+
+	// A restart silently returns the pool to per-connection selection, which is
+	// what makes the outgoing IP jump between nodes
+	if w.poolStore != nil {
+		if pinned := w.poolStore.Get().PinnedTag; pinned != "" {
+			if restored, err := xkeen.EnsurePinned(rt, w.config.XrayAPIAddr, top, pinned); err != nil {
+				w.writeLog("[PIN] Не удалось проверить закрепление: %v", err)
+			} else if restored {
+				w.writeLog("[PIN] Закрепление восстановлено после перезапуска ядра: %s", pinned)
+			}
+		} else if tag, err := w.pinBest(rt, top); err == nil {
+			w.writeLog("[PIN] Трафик закреплён за нодой %s", tag)
+		}
+	}
+
+	w.ticks++
+	every := w.config.HealthCheckEvery
+	if every < 1 {
+		every = 5
+	}
+	if w.ticks%every != 0 {
+		return
+	}
+
+	verdict := w.health.Probe(time.Duration(w.config.ProbeTimeoutMs)*time.Millisecond + 8*time.Second)
+	if !verdict.OK {
+		w.writeLog("[HEALTH] %s", verdict)
+	}
+
+	if !w.health.ExitLooksBlocked() {
+		return
+	}
+
+	w.writeLog("[HEALTH] Через текущую ноду не работают: %s — меняю выход",
+		strings.Join(w.health.Failing(), ", "))
+	w.rotateExit(rt, top)
+}
+
+// rotateExit condemns the current node and pins the next best one.
+func (w *Watchdog) rotateExit(rt xkeen.Runtime, top xkeen.Topology) {
+	if w.poolStore == nil {
+		return
+	}
+
+	if current := w.poolStore.Get().PinnedTag; current != "" {
+		ttl := time.Duration(w.config.BlacklistTTLSec) * time.Second
+		if ttl <= 0 {
+			ttl = 30 * time.Minute
+		}
+		w.mu.Lock()
+		w.badNodes[current] = time.Now().Add(ttl)
+		w.mu.Unlock()
+	}
+
+	tag, err := w.pinBest(rt, top)
+	if err != nil {
+		w.writeLog("[HEALTH] Не удалось сменить ноду: %v", err)
+		return
+	}
+
+	w.health.Reset()
+	w.writeLog("[HEALTH] Выход переключён на %s", tag)
+}
+
+// pinBest picks the fastest node that is not currently condemned and pins it.
+func (w *Watchdog) pinBest(rt xkeen.Runtime, top xkeen.Topology) (string, error) {
+	tag, err := xkeen.PinBestNode(rt, w.config.XrayAPIAddr, w.config.OutboundsFile, top,
+		w.subscription.GetServers(), w.excludedNodes(),
+		time.Duration(w.config.ProbeTimeoutMs)*time.Millisecond, w.config.ProbeConcurrency)
+	if err != nil {
+		return "", err
+	}
+
+	if w.poolStore != nil {
+		if err := w.poolStore.SetPinned(tag); err != nil {
+			w.writeLog("[PIN] Не удалось сохранить закрепление: %v", err)
+		}
+	}
+
+	return tag, nil
+}
+
+// excludedNodes lists pool tags still serving their condemnation.
+func (w *Watchdog) excludedNodes() map[string]bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	excluded := make(map[string]bool, len(w.badNodes))
+	for tag, until := range w.badNodes {
+		if time.Now().After(until) {
+			delete(w.badNodes, tag)
+			continue
+		}
+		excluded[tag] = true
+	}
+
+	return excluded
 }
 
 func (w *Watchdog) handleFailover(reason string) {
@@ -465,6 +592,13 @@ func (w *Watchdog) writeLog(format string, args ...interface{}) {
 	if w.eventBus != nil {
 		w.eventBus.Publish(sse.Event{Type: "log", Data: msg})
 	}
+}
+
+// Log writes a line to the panel log and the UI stream. Exported so that pool
+// events raised outside the watchdog land in the same place: they used to go to
+// stdout, which the init script discards, leaving nothing to debug with.
+func (w *Watchdog) Log(format string, args ...interface{}) {
+	w.writeLog(format, args...)
 }
 
 // GetStatus returns the current status.

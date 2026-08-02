@@ -41,6 +41,12 @@ type Config struct {
 	// Cap on pool size: every node is probed by observatory separately
 	PoolMaxNodes int `yaml:"pool_max_nodes"`
 
+	// Health probes of real services, used to catch an exit IP a CDN blocks
+	// while plain connectivity still works. One service per round, in rotation.
+	HealthCheckURLs     []string `yaml:"health_check_urls"`
+	HealthCheckEvery    int      `yaml:"health_check_every"`    // раз в N циклов watchdog
+	HealthFailThreshold int      `yaml:"health_fail_threshold"` // неудач одного сервиса подряд
+
 	// Countries to avoid when switching automatically
 	GeoIPPath                string   `yaml:"geoip_path"`
 	AutoSwitchAvoidCountries []string `yaml:"auto_switch_avoid_countries"`
