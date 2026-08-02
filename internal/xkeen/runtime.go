@@ -1,6 +1,7 @@
 package xkeen
 
 import (
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,11 @@ import (
 	"sync"
 	"time"
 )
+
+// Log is where this package reports. It defaults to the standard logger, whose
+// stdout the Entware init script discards — main.go points it at the panel log
+// so that pool and restart events survive to be read after an incident.
+var Log = log.Printf
 
 // Runtime is a snapshot of the XKeen installation on this router.
 type Runtime struct {

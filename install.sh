@@ -87,6 +87,7 @@ pool_max_nodes: 10
 # Проверка реальных сервисов через активную ноду (ловит IP, забаненные у CDN)
 health_check_every: 5
 health_fail_threshold: 2
+health_quorum: 2
 YAML
     echo "Конфиг: $INSTALL_DIR/config.yaml"
 else

@@ -259,8 +259,10 @@ func (h *Handlers) pinPoolNode(rt xkeen.Runtime, top xkeen.Topology, server *mod
 		return fmt.Errorf("%w. Закрепление ноды требует блок api в конфиге Xray — его добавляет `xkeen -sb on`", err)
 	}
 
-	// The override lives only in the core's memory — store it to reapply after a restart
-	if err := h.pool.SetPinned(tag); err != nil {
+	// The override lives only in the core's memory — store it to reapply after a
+	// restart, together with the node it means so a moved tag is detectable
+	node := xkeen.NodeKeyForTag(h.config.OutboundsFile, selector, tag)
+	if err := h.pool.SetPinned(tag, node); err != nil {
 		log.Printf("[SELECT] Не удалось сохранить закреплённую ноду: %v", err)
 	}
 
@@ -522,7 +524,11 @@ func (h *Handlers) pinAfterRestart(rt xkeen.Runtime) {
 		return
 	}
 
-	if err := h.pool.SetPinned(tag); err != nil {
+	selector := xkeen.DefaultPoolSelector
+	if len(top.Selectors) > 0 {
+		selector = top.Selectors[0]
+	}
+	if err := h.pool.SetPinned(tag, xkeen.NodeKeyForTag(h.config.OutboundsFile, selector, tag)); err != nil {
 		log.Printf("[PIN] Не удалось сохранить закрепление: %v", err)
 	}
 	h.watchdog.Log("[PIN] Трафик закреплён за нодой %s", tag)

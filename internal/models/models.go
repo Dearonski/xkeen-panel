@@ -46,6 +46,7 @@ type Config struct {
 	HealthCheckURLs     []string `yaml:"health_check_urls"`
 	HealthCheckEvery    int      `yaml:"health_check_every"`    // раз в N циклов watchdog
 	HealthFailThreshold int      `yaml:"health_fail_threshold"` // неудач одного сервиса подряд
+	HealthQuorum        int      `yaml:"health_quorum"`         // сколько сервисов должны отвалиться
 
 	// Countries to avoid when switching automatically
 	GeoIPPath                string   `yaml:"geoip_path"`

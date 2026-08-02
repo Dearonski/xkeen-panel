@@ -19,7 +19,12 @@ type PoolState struct {
 	OriginalTag string `json:"original_tag,omitempty"`
 	RoutingFile string `json:"routing_file,omitempty"`
 	APIFile     string `json:"api_file,omitempty"`   // api config the panel created, removed when leaving pool mode
-	PinnedTag   string `json:"pinned_tag,omitempty"` // node pinned by hand via the balancer API
+	PinnedTag   string `json:"pinned_tag,omitempty"` // node pinned via the balancer API
+
+	// PinnedNode is the endpoint that tag carried when it was pinned. Tags are
+	// slots, not identities: a refresh can leave the tag in place and put a
+	// different server behind it, and then the pin silently means something else.
+	PinnedNode string `json:"pinned_node,omitempty"`
 }
 
 // PoolStore persists PoolState next to the panel's other data.
@@ -76,10 +81,12 @@ func (s *PoolStore) Set(state PoolState) error {
 	return os.WriteFile(s.filePath(), data, 0600)
 }
 
-// SetPinned records the hand-picked node so it can be re-applied after a restart —
-// a balancer override lives only in Xray's memory.
-func (s *PoolStore) SetPinned(tag string) error {
+// SetPinned records the pinned node so it can be re-applied after a restart —
+// a balancer override lives only in Xray's memory — and so that the tag moving
+// to a different server is detectable.
+func (s *PoolStore) SetPinned(tag, node string) error {
 	state := s.Get()
 	state.PinnedTag = tag
+	state.PinnedNode = node
 	return s.Set(state)
 }

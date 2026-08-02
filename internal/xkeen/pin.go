@@ -58,6 +58,31 @@ func PoolNodes(outboundsPath, selector string, servers []models.Server) ([]PoolN
 	return nodes, nil
 }
 
+// NodeKeyForTag returns the stable identity of the node a tag currently carries.
+// Empty when the tag is gone from the pool.
+func NodeKeyForTag(outboundsPath, selector, tag string) string {
+	layout, err := ReadPoolLayout(outboundsPath, selector)
+	if err != nil {
+		return ""
+	}
+	if ep, ok := layout[tag]; ok {
+		return ep.Key()
+	}
+	return ""
+}
+
+// PinDrifted reports whether the pin no longer means the node it was set on:
+// either the tag left the pool, or a refresh put a different server behind it.
+//
+// The tag alone cannot show this — an override on a tag that now points
+// somewhere else reads back as perfectly healthy.
+func PinDrifted(outboundsPath, selector, tag, node string) bool {
+	if tag == "" || node == "" {
+		return false
+	}
+	return NodeKeyForTag(outboundsPath, selector, tag) != node
+}
+
 // PinBestNode measures the pool and pins the fastest node the caller has not
 // excluded, returning its tag.
 //

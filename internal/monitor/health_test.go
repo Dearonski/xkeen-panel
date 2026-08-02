@@ -63,23 +63,28 @@ func TestProbeURLUnreachable(t *testing.T) {
 	}
 }
 
-// One service per round: these are real public endpoints, and probing all of
-// them every tick would collect rate limits for nothing.
-func TestHealthCheckerRotatesOneServicePerRound(t *testing.T) {
+// Every service is sampled each round. Round-robin meant a given service was
+// checked only every 40 minutes, so establishing two consecutive failures took
+// over an hour — far too slow to catch an outage.
+func TestHealthCheckerProbesEveryServicePerRound(t *testing.T) {
 	a := serverWith(t, 200, nil)
 	b := serverWith(t, 200, nil)
 	c := serverWith(t, 200, nil)
 
-	checker := NewHealthChecker([]string{a, b, c}, 2)
+	checker := NewHealthChecker([]string{a, b, c}, 2, 2)
 
-	seen := map[string]int{}
-	for range 6 {
-		seen[checker.Probe(2*time.Second).URL]++
+	got := checker.Probe(2 * time.Second)
+
+	if len(got) != 3 {
+		t.Fatalf("verdicts = %d, want one per service", len(got))
 	}
-
+	seen := map[string]bool{}
+	for _, v := range got {
+		seen[v.URL] = true
+	}
 	for _, url := range []string{a, b, c} {
-		if seen[url] != 2 {
-			t.Errorf("%s probed %d times over 6 rounds, want 2", url, seen[url])
+		if !seen[url] {
+			t.Errorf("%s was not probed", url)
 		}
 	}
 }
@@ -91,18 +96,18 @@ func TestExitLooksBlockedNeedsTwoServices(t *testing.T) {
 	bad1 := serverWith(t, 403, nil)
 	bad2 := serverWith(t, 403, nil)
 
-	checker := NewHealthChecker([]string{bad1, good}, 2)
+	checker := NewHealthChecker([]string{bad1, good}, 2, 2)
 
 	// bad1 fails twice, good keeps passing: one service is not enough
-	for range 4 {
+	for range 2 {
 		checker.Probe(2 * time.Second)
 	}
 	if checker.ExitLooksBlocked() {
 		t.Error("one failing service must not condemn the exit")
 	}
 
-	checker = NewHealthChecker([]string{bad1, bad2}, 2)
-	for range 4 {
+	checker = NewHealthChecker([]string{bad1, bad2}, 2, 2)
+	for range 2 {
 		checker.Probe(2 * time.Second)
 	}
 	if !checker.ExitLooksBlocked() {
@@ -110,12 +115,29 @@ func TestExitLooksBlockedNeedsTwoServices(t *testing.T) {
 	}
 }
 
-// A service that recovers must stop counting against the exit.
-func TestHealthCheckerForgetsRecoveredService(t *testing.T) {
+// A quorum of one lets a single critical service speak for the exit.
+func TestExitLooksBlockedHonoursQuorum(t *testing.T) {
+	bad := serverWith(t, 403, nil)
+	good := serverWith(t, 200, nil)
+
+	checker := NewHealthChecker([]string{bad, good}, 2, 1)
+	for range 2 {
+		checker.Probe(2 * time.Second)
+	}
+
+	if !checker.ExitLooksBlocked() {
+		t.Error("with quorum 1 a single failing service should condemn the exit")
+	}
+}
+
+// A service that recovers stops counting — but it takes as many successes as it
+// took failures. One lucky response used to wipe the record of an outage that
+// was still going on.
+func TestHealthCheckerDrainsFailuresGradually(t *testing.T) {
 	flaky := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		flaky++
-		if flaky <= 2 {
+		if flaky <= 3 {
 			w.WriteHeader(403)
 			return
 		}
@@ -124,21 +146,26 @@ func TestHealthCheckerForgetsRecoveredService(t *testing.T) {
 	defer srv.Close()
 
 	bad := serverWith(t, 403, nil)
-	checker := NewHealthChecker([]string{srv.URL, bad}, 2)
+	checker := NewHealthChecker([]string{srv.URL, bad}, 2, 2)
 
-	for range 4 {
+	for range 3 {
 		checker.Probe(2 * time.Second)
 	}
 	if !checker.ExitLooksBlocked() {
 		t.Fatal("both services failing should condemn the exit")
 	}
 
-	// The flaky one recovers
-	for range 2 {
+	// One success is not enough to clear three failures
+	checker.Probe(2 * time.Second)
+	if !checker.ExitLooksBlocked() {
+		t.Error("a single success wiped the evidence")
+	}
+
+	for range 3 {
 		checker.Probe(2 * time.Second)
 	}
 	if checker.ExitLooksBlocked() {
-		t.Error("a recovered service must stop counting")
+		t.Error("a sustained recovery must clear the verdict")
 	}
 }
 
@@ -146,7 +173,7 @@ func TestHealthCheckerResetClearsState(t *testing.T) {
 	bad1 := serverWith(t, 403, nil)
 	bad2 := serverWith(t, 403, nil)
 
-	checker := NewHealthChecker([]string{bad1, bad2}, 2)
+	checker := NewHealthChecker([]string{bad1, bad2}, 2, 2)
 	for range 4 {
 		checker.Probe(2 * time.Second)
 	}
@@ -165,7 +192,7 @@ func TestHealthCheckerResetClearsState(t *testing.T) {
 }
 
 func TestNewHealthCheckerDefaults(t *testing.T) {
-	checker := NewHealthChecker(nil, 0)
+	checker := NewHealthChecker(nil, 0, 0)
 
 	if len(checker.urls) == 0 {
 		t.Error("no default services configured")

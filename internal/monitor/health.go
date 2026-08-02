@@ -35,54 +35,71 @@ type healthVerdict struct {
 	Err     error
 }
 
-// HealthChecker probes one service per round, cycling through the list.
+// HealthChecker probes the configured services once per health round.
 //
-// One request per round on purpose: these are real public services, and probing
-// all of them on every watchdog tick would be both pointless and a good way to
-// collect rate limits.
+// A round is deliberately rare — one every few watchdog ticks — rather than
+// small: checking a single service per round meant each one was sampled only
+// every 40 minutes, so two consecutive failures took over an hour to establish
+// and an outage went unnoticed. A handful of small requests every ten minutes
+// is not a rate-limit risk.
 type HealthChecker struct {
 	urls      []string
 	threshold int
+	quorum    int
 
 	mu       sync.Mutex
-	next     int
 	failures map[string]int
 }
 
-func NewHealthChecker(urls []string, threshold int) *HealthChecker {
+func NewHealthChecker(urls []string, threshold, quorum int) *HealthChecker {
 	if len(urls) == 0 {
 		urls = DefaultHealthURLs
 	}
 	if threshold < 1 {
 		threshold = 2
 	}
+	if quorum < 1 {
+		quorum = 2
+	}
 
 	return &HealthChecker{
 		urls:      urls,
 		threshold: threshold,
+		quorum:    quorum,
 		failures:  make(map[string]int),
 	}
 }
 
-// Probe checks the next service in the rotation.
-func (h *HealthChecker) Probe(timeout time.Duration) healthVerdict {
-	h.mu.Lock()
-	url := h.urls[h.next%len(h.urls)]
-	h.next++
-	h.mu.Unlock()
+// Probe checks every service and returns the verdicts.
+func (h *HealthChecker) Probe(timeout time.Duration) []healthVerdict {
+	verdicts := make([]healthVerdict, len(h.urls))
 
-	verdict := probeURL(url, timeout)
+	var wg sync.WaitGroup
+	for i, url := range h.urls {
+		wg.Add(1)
+		go func(i int, url string) {
+			defer wg.Done()
+			verdicts[i] = probeURL(url, timeout)
+		}(i, url)
+	}
+	wg.Wait()
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if verdict.OK {
-		delete(h.failures, url)
-	} else {
-		h.failures[url]++
+	// A leaky bucket rather than a reset: one lucky success used to wipe the
+	// evidence of an outage that was still going on.
+	for _, verdict := range verdicts {
+		if verdict.OK {
+			if h.failures[verdict.URL] > 0 {
+				h.failures[verdict.URL]--
+			}
+			continue
+		}
+		h.failures[verdict.URL]++
 	}
 
-	return verdict
+	return verdicts
 }
 
 // ExitLooksBlocked reports whether the current exit node should be replaced.
@@ -101,7 +118,7 @@ func (h *HealthChecker) ExitLooksBlocked() bool {
 		}
 	}
 
-	return bad >= 2
+	return bad >= h.quorum
 }
 
 // Reset clears the counters after the exit node changed.

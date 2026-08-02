@@ -61,7 +61,7 @@ func NewWatchdog(cfg *models.Config, sub *xkeen.SubscriptionManager, det *xkeen.
 		lastLatency:  -1,
 		blacklist:    make(map[string]time.Time),
 		badNodes:     make(map[string]time.Time),
-		health:       NewHealthChecker(cfg.HealthCheckURLs, cfg.HealthFailThreshold),
+		health:       NewHealthChecker(cfg.HealthCheckURLs, cfg.HealthFailThreshold, cfg.HealthQuorum),
 	}
 }
 
@@ -207,18 +207,8 @@ func (w *Watchdog) superviseExit() {
 
 	rt := w.detector.Runtime()
 
-	// A restart silently returns the pool to per-connection selection, which is
-	// what makes the outgoing IP jump between nodes
 	if w.poolStore != nil {
-		if pinned := w.poolStore.Get().PinnedTag; pinned != "" {
-			if restored, err := xkeen.EnsurePinned(rt, w.config.XrayAPIAddr, top, pinned); err != nil {
-				w.writeLog("[PIN] Не удалось проверить закрепление: %v", err)
-			} else if restored {
-				w.writeLog("[PIN] Закрепление восстановлено после перезапуска ядра: %s", pinned)
-			}
-		} else if tag, err := w.pinBest(rt, top); err == nil {
-			w.writeLog("[PIN] Трафик закреплён за нодой %s", tag)
-		}
+		w.superviseP(rt, top)
 	}
 
 	w.ticks++
@@ -230,9 +220,10 @@ func (w *Watchdog) superviseExit() {
 		return
 	}
 
-	verdict := w.health.Probe(healthProbeTimeout)
-	if !verdict.OK {
-		w.writeLog("[HEALTH] %s", verdict)
+	for _, verdict := range w.health.Probe(healthProbeTimeout) {
+		if !verdict.OK {
+			w.writeLog("[HEALTH] %s", verdict)
+		}
 	}
 
 	if !w.health.ExitLooksBlocked() {
@@ -245,12 +236,55 @@ func (w *Watchdog) superviseExit() {
 	since := time.Since(w.lastRotation)
 	w.mu.RUnlock()
 	if !w.lastRotation.IsZero() && since < rotationCooldown {
+		w.writeLog("[HEALTH] Через ноду не работают %d сервис(а), но смена выхода уже была %s назад — жду",
+			len(w.health.Failing()), since.Truncate(time.Minute))
 		return
 	}
 
 	w.writeLog("[HEALTH] Через текущую ноду не работают: %s — меняю выход",
 		strings.Join(w.health.Failing(), ", "))
 	w.rotateExit(rt, top)
+}
+
+// superviseP.in keeps the pin meaningful. Three things can break it and each
+// needs a different answer:
+//
+//   - the tag left the pool, or a refresh put a different server behind it —
+//     the stored pin now means something else, so re-pin from scratch
+//   - the core restarted and dropped the override — re-apply it
+//   - nothing is pinned yet — pin the best node
+func (w *Watchdog) superviseP(rt xkeen.Runtime, top xkeen.Topology) {
+	state := w.poolStore.Get()
+
+	if state.PinnedTag == "" {
+		tag, err := w.pinBest(rt, top)
+		if err != nil {
+			w.writeLog("[PIN] Не удалось закрепить ноду: %v", err)
+			return
+		}
+		w.writeLog("[PIN] Трафик закреплён за нодой %s", tag)
+		return
+	}
+
+	if xkeen.PinDrifted(w.config.OutboundsFile, w.selector(top), state.PinnedTag, state.PinnedNode) {
+		w.writeLog("[PIN] %s больше не ведёт на закреплённый сервер — выбираю заново", state.PinnedTag)
+		tag, err := w.pinBest(rt, top)
+		if err != nil {
+			w.writeLog("[PIN] Не удалось перезакрепить: %v", err)
+			return
+		}
+		w.writeLog("[PIN] Трафик закреплён за нодой %s", tag)
+		return
+	}
+
+	restored, err := xkeen.EnsurePinned(rt, w.config.XrayAPIAddr, top, state.PinnedTag)
+	if err != nil {
+		w.writeLog("[PIN] Не удалось проверить закрепление: %v", err)
+		return
+	}
+	if restored {
+		w.writeLog("[PIN] Закрепление восстановлено после перезапуска ядра: %s", state.PinnedTag)
+	}
 }
 
 // rotateExit condemns the current node and pins the next best one.
@@ -293,12 +327,21 @@ func (w *Watchdog) pinBest(rt xkeen.Runtime, top xkeen.Topology) (string, error)
 	}
 
 	if w.poolStore != nil {
-		if err := w.poolStore.SetPinned(tag); err != nil {
+		node := xkeen.NodeKeyForTag(w.config.OutboundsFile, w.selector(top), tag)
+		if err := w.poolStore.SetPinned(tag, node); err != nil {
 			w.writeLog("[PIN] Не удалось сохранить закрепление: %v", err)
 		}
 	}
 
 	return tag, nil
+}
+
+// selector is the tag prefix the pool's balancer selects on.
+func (w *Watchdog) selector(top xkeen.Topology) string {
+	if len(top.Selectors) > 0 {
+		return top.Selectors[0]
+	}
+	return xkeen.DefaultPoolSelector
 }
 
 // excludedNodes lists pool tags still serving their condemnation.

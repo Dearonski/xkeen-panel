@@ -76,6 +76,10 @@ func main() {
 	watchdog.SetEventBus(eventBus)
 	watchdog.SetPoolStore(poolStore)
 
+	// Package xkeen logs to stdout by default, which the init script discards —
+	// send its pool and restart events to the panel log instead
+	xkeen.Log = watchdog.Log
+
 	// GeoIP reuses the geoip.dat already installed for Xray
 	var geoMatcher *geoip.Matcher
 	if geoPath := geoip.FindDat(cfg.GeoIPPath); geoPath == "" {
@@ -282,6 +286,7 @@ func loadConfig(path string) (*models.Config, error) {
 		HealthCheckURLs:          monitor.DefaultHealthURLs,
 		HealthCheckEvery:         5,
 		HealthFailThreshold:      2,
+		HealthQuorum:             2,
 		GeoIPPath:                "/opt/etc/xray/dat/geoip_v2fly.dat",
 		AutoSwitchAvoidCountries: []string{"RU", "BY"},
 	}

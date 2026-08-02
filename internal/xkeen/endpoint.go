@@ -39,6 +39,12 @@ func endpointOfOutbound(ob map[string]interface{}) (endpoint, bool) {
 	return endpoint{Address: address, Port: port, UUID: uuid}, true
 }
 
+// Key renders an endpoint as a stable string, so a pin can be stored as the
+// node it means and not merely as the tag that happens to carry it.
+func (e endpoint) Key() string {
+	return e.Address + ":" + strconv.Itoa(e.Port) + ":" + e.UUID
+}
+
 // PoolLayout is the tag→endpoint mapping currently written to the config.
 //
 // Keeping a server on the tag it already has is what makes a refresh cheap: a
