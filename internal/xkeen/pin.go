@@ -129,16 +129,21 @@ func PinBestNode(rt Runtime, apiAddr, outboundsPath string, top Topology, server
 // A balancer override lives only in the core's memory and has no TTL, so every
 // Xray restart silently returns the pool to per-connection selection — the exact
 // behaviour pinning exists to avoid.
+//
+// Only the override counts. Comparing against the effective target hid the
+// failure whenever the strategy happened to rank the pinned tag first: the pin
+// was gone, traffic was being balanced per connection again, and the panel saw
+// the expected tag and said nothing.
 func EnsurePinned(rt Runtime, apiAddr string, top Topology, wanted string) (bool, error) {
 	if wanted == "" || top.Mode != TopologyPool {
 		return false, nil
 	}
 
-	current, err := CurrentBalancerTarget(rt, apiAddr, top.BalancerTag)
+	info, err := BalancerStatus(rt, apiAddr, top.BalancerTag)
 	if err != nil {
 		return false, err
 	}
-	if current == wanted {
+	if info.Override == wanted {
 		return false, nil
 	}
 

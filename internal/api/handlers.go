@@ -122,7 +122,7 @@ func (h *Handlers) refreshPool(servers []models.Server) (xkeen.SyncResult, error
 	}
 	if result.Changed {
 		h.detector.InvalidateTopology()
-		log.Printf("[POOL] Пул синхронизирован: +%d, -%d, без перезапуска=%v", len(result.Added), len(result.Removed), result.Live)
+		h.watchdog.Log("[POOL] Пул синхронизирован: +%d, -%d, заменено %d, без перезапуска=%v", len(result.Added), len(result.Removed), len(result.Replaced), result.Live)
 	}
 
 	return result, nil
@@ -580,6 +580,7 @@ func (h *Handlers) HandlePoolSync(w http.ResponseWriter, r *http.Request) {
 		"changed":    result.Changed,
 		"added":      result.Added,
 		"removed":    result.Removed,
+		"replaced":   result.Replaced,
 		"live":       result.Live,
 		"restarting": result.Restarted,
 	})

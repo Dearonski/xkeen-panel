@@ -419,7 +419,7 @@ func (w *Watchdog) handlePoolFailover(reason string, top xkeen.Topology) {
 	if result.Live {
 		how = "без перезапуска"
 	}
-	w.writeLog("[POOL] Пул приведён к подписке: +%d, -%d (%s)", len(result.Added), len(result.Removed), how)
+	w.writeLog("[POOL] Пул приведён к подписке: +%d, -%d, заменено %d (%s)", len(result.Added), len(result.Removed), len(result.Replaced), how)
 }
 
 // selectBest picks the lowest-latency live server, skipping the current one,

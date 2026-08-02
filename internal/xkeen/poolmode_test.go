@@ -199,8 +199,15 @@ Selects:
     1   sub-1
     2   sub-2`
 
-	if got := parseBalancerInfo(out); got != "sub-2" {
-		t.Errorf("parseBalancerInfo = %q, want sub-2 (override wins over leastPing)", got)
+	got := parseBalancerInfo(out)
+	if got.Override != "sub-2" {
+		t.Errorf("Override = %q, want sub-2", got.Override)
+	}
+	if got.Selects != "sub-1" {
+		t.Errorf("Selects = %q, want sub-1 — the two sections must stay apart", got.Selects)
+	}
+	if got.Effective() != "sub-2" {
+		t.Errorf("Effective = %q, want the override to win", got.Effective())
 	}
 }
 
@@ -210,7 +217,14 @@ Selecting Override:
 Selects:
     1   sub-3`
 
-	if got := parseBalancerInfo(out); got != "sub-3" {
-		t.Errorf("parseBalancerInfo = %q, want sub-3", got)
+	got := parseBalancerInfo(out)
+	if got.Override != "" {
+		t.Errorf("Override = %q, want empty — nothing is pinned", got.Override)
+	}
+	if got.Selects != "sub-3" {
+		t.Errorf("Selects = %q, want sub-3", got.Selects)
+	}
+	if got.Effective() != "sub-3" {
+		t.Errorf("Effective = %q, want the strategy pick", got.Effective())
 	}
 }

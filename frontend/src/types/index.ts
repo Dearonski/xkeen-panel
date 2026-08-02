@@ -43,6 +43,7 @@ export type PoolSyncResult = {
     changed: boolean
     added?: string[]
     removed?: string[]
+    replaced?: string[]
     live: boolean
     restarting: boolean
 }

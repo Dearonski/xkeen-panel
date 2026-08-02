@@ -29,7 +29,10 @@ const (
 // The template is the outbound being replaced: its streamSettings.sockopt is
 // copied onto every node, because XKeen validates sockopt.mark on each of them
 // and a pool built without it would fail the check for the whole pool at once.
-func BuildPoolOutbounds(servers []models.Server, selector string, template map[string]interface{}) ([]interface{}, error) {
+//
+// existing is the pool already in the config; servers found there keep the tag
+// they already have, so a refresh only touches what genuinely changed.
+func BuildPoolOutbounds(servers []models.Server, selector string, template map[string]interface{}, existing PoolLayout) ([]interface{}, error) {
 	if selector == "" {
 		selector = DefaultPoolSelector
 	}
@@ -37,18 +40,12 @@ func BuildPoolOutbounds(servers []models.Server, selector string, template map[s
 	format := detectOutboundFormat(template)
 
 	var nodes []interface{}
-	for _, server := range servers {
-		if server.RawURI == "" || (server.Protocol != "" && server.Protocol != "vless") {
-			continue
-		}
-
-		params, err := ParseVLESS(server.RawURI)
+	for _, entry := range assignTags(servers, selector, existing) {
+		params, err := ParseVLESS(entry.Server.RawURI)
 		if err != nil {
 			continue
 		}
-
-		tag := selector + strconv.Itoa(len(nodes)+1)
-		nodes = append(nodes, mergeOutbound(template, buildOutboundFromURI(params, tag, format)))
+		nodes = append(nodes, mergeOutbound(template, buildOutboundFromURI(params, entry.Tag, format)))
 	}
 
 	if len(nodes) == 0 {
@@ -58,54 +55,33 @@ func BuildPoolOutbounds(servers []models.Server, selector string, template map[s
 	return nodes, nil
 }
 
-// PoolMatchesSubscription reports whether the pool in the config already covers
-// exactly the subscription's VLESS servers, in the same order.
+// PoolMatchesSubscription reports whether the pool already covers exactly the
+// wanted servers, as a SET.
 //
-// Callers check this before syncing: writing the pool means restarting the core,
-// which drops live connections, so an unchanged subscription must be a no-op.
+// Order deliberately does not count. Candidates are ranked by measured latency,
+// which jitters between runs, so comparing sequences reported a drift on nearly
+// every refresh — and each such "drift" rewrote the whole pool and tore down
+// every live connection through it.
 func PoolMatchesSubscription(outboundsPath string, servers []models.Server, selector string) (bool, error) {
-	if selector == "" {
-		selector = DefaultPoolSelector
-	}
-
-	config, err := ReadOutboundsConfig(outboundsPath)
+	layout, err := ReadPoolLayout(outboundsPath, selector)
 	if err != nil {
 		return false, err
 	}
 
-	var current [][3]interface{}
-	for _, raw := range asSlice(config["outbounds"]) {
-		ob, ok := raw.(map[string]interface{})
-		if !ok || isServiceOutbound(ob) {
-			continue
-		}
-		if tag, _ := ob["tag"].(string); !strings.Contains(tag, selector) {
-			continue
-		}
-		address, port, uuid, ok := readProxyEndpoint(ob)
-		if !ok {
-			continue
-		}
-		current = append(current, [3]interface{}{address, port, uuid})
-	}
+	current := layout.Endpoints()
 
-	var wanted [][3]interface{}
+	wanted := map[endpoint]bool{}
 	for _, server := range servers {
-		if server.RawURI == "" || (server.Protocol != "" && server.Protocol != "vless") {
-			continue
+		if ep, ok := endpointOfServer(server); ok {
+			wanted[ep] = true
 		}
-		params, err := ParseVLESS(server.RawURI)
-		if err != nil {
-			continue
-		}
-		wanted = append(wanted, [3]interface{}{params.Address, params.Port, params.UUID})
 	}
 
 	if len(current) != len(wanted) {
 		return false, nil
 	}
-	for i := range current {
-		if current[i] != wanted[i] {
+	for ep := range wanted {
+		if !current[ep] {
 			return false, nil
 		}
 	}
@@ -264,24 +240,53 @@ func OverrideBalancerTarget(rt Runtime, apiAddr, balancerTag, outboundTag string
 	return nil
 }
 
-// CurrentBalancerTarget reports the node traffic actually goes through.
-func CurrentBalancerTarget(rt Runtime, apiAddr, balancerTag string) (string, error) {
+// BalancerInfo separates the forced override from what the strategy would pick.
+//
+// The distinction is load-bearing: "leastPing currently ranks sub-2 first" and
+// "traffic is pinned to sub-2" look identical from the outside but behave
+// completely differently — without an override the balancer still chooses per
+// connection, so the exit IP keeps moving.
+type BalancerInfo struct {
+	Override string // tag forced through `bo`, empty when none is set
+	Selects  string // what the strategy ranks first
+}
+
+// Effective is the tag traffic actually goes through.
+func (b BalancerInfo) Effective() string {
+	if b.Override != "" {
+		return b.Override
+	}
+	return b.Selects
+}
+
+// BalancerStatus reads the balancer's current state.
+func BalancerStatus(rt Runtime, apiAddr, balancerTag string) (BalancerInfo, error) {
 	out, err := xrayAPI(rt, "bi", "-s", apiAddr, balancerTag)
 	if err != nil {
-		return "", fmt.Errorf("api балансировщика недоступен: %w", err)
+		return BalancerInfo{}, fmt.Errorf("api балансировщика недоступен: %w", err)
 	}
 	return parseBalancerInfo(out), nil
 }
 
-// parseBalancerInfo reads `xray api bi` output. It prints two sections and the
-// override wins: after `bo` the traffic goes through the forced node, not the
-// leastPing pick, so reporting Selects would name the wrong one.
+// CurrentBalancerTarget reports the node traffic actually goes through.
+func CurrentBalancerTarget(rt Runtime, apiAddr, balancerTag string) (string, error) {
+	info, err := BalancerStatus(rt, apiAddr, balancerTag)
+	if err != nil {
+		return "", err
+	}
+	return info.Effective(), nil
+}
+
+// parseBalancerInfo reads `xray api bi` output, keeping the two sections apart:
 //
 //	Selecting Override:
 //	    1   sub-2
 //	Selects:
 //	    1   sub-1
-func parseBalancerInfo(out string) string {
+//
+// An empty Override section means nothing is pinned, however plausible the
+// Selects entry looks.
+func parseBalancerInfo(out string) BalancerInfo {
 	const (
 		sectionNone = iota
 		sectionOverride
@@ -315,11 +320,7 @@ func parseBalancerInfo(out string) string {
 		}
 	}
 
-	if override != "" {
-		return override
-	}
-
-	return selects
+	return BalancerInfo{Override: override, Selects: selects}
 }
 
 // BalancerAPIAvailable reports whether the gRPC API answers. XKeen only adds the

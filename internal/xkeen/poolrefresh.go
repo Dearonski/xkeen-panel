@@ -3,6 +3,7 @@ package xkeen
 import (
 	"fmt"
 	"log"
+	"sort"
 
 	"xkeen-panel/internal/models"
 )
@@ -12,6 +13,7 @@ type SyncResult struct {
 	Changed   bool     `json:"changed"`
 	Added     []string `json:"added,omitempty"`
 	Removed   []string `json:"removed,omitempty"`
+	Replaced  []string `json:"replaced,omitempty"`
 	Restarted bool     `json:"restarted"`
 	Live      bool     `json:"live"` // applied through the API, no connections dropped
 }
@@ -37,7 +39,11 @@ func RefreshPool(rt Runtime, outboundsPath, apiAddr string, servers []models.Ser
 		selector = DefaultPoolSelector
 	}
 
-	wanted := SelectPoolServers(servers, sel)
+	current, err := ReadPoolLayout(outboundsPath, selector)
+	if err != nil {
+		return result, err
+	}
+	wanted := SelectPoolServers(servers, sel.WithCurrentPool(current))
 
 	matches, err := PoolMatchesSubscription(outboundsPath, wanted, selector)
 	if err != nil {
@@ -47,23 +53,20 @@ func RefreshPool(rt Runtime, outboundsPath, apiAddr string, servers []models.Ser
 		return result, nil
 	}
 
-	before, err := poolTagsInFile(outboundsPath, selector)
-	if err != nil {
-		return result, err
-	}
+	before := current
 
 	if err := SyncPool(rt, outboundsPath, wanted, state, PoolSelection{MaxNodes: len(wanted)}); err != nil {
 		return result, err
 	}
 
-	after, err := poolTagsInFile(outboundsPath, selector)
+	after, err := ReadPoolLayout(outboundsPath, selector)
 	if err != nil {
 		return result, err
 	}
 
 	result.Changed = true
-	result.Added = missingFrom(after, before)
-	result.Removed = missingFrom(before, after)
+	result.Added = tagsMissingFrom(after, before)
+	result.Removed = tagsMissingFrom(before, after)
 
 	// A pool built by an older panel has an api block that never listened, so the
 	// hot path would fail every time until the file is migrated
@@ -83,16 +86,16 @@ func RefreshPool(rt Runtime, outboundsPath, apiAddr string, servers []models.Ser
 		log.Printf("[POOL] Не удалось обновить observatory: %v", err)
 	}
 
-	// Tags are positional (sub-1, sub-2, …), so a server swapped in place keeps
-	// its tag while its endpoint changes. Such a node has to be replaced in the
-	// running core too, or it would keep the old address until the next restart.
-	replaced := intersect(before, after)
+	// Only the tags whose endpoint actually changed need touching in the running
+	// core. Treating every surviving tag as replaced tore down all ten outbounds
+	// on each refresh, and with them every connection they carried.
+	result.Replaced = changedTags(before, after)
 
 	// The live path is attempted only for an api block the panel wrote, because
 	// only then is HandlerService guaranteed present. Otherwise the removals
 	// would land and the additions would fail, leaving the core with no nodes.
 	if !upgraded && !observatoryChanged && state.APIFile != "" {
-		if err := applyPoolLive(rt, apiAddr, outboundsPath, selector, replaced, result.Removed); err == nil {
+		if err := applyPoolLive(rt, apiAddr, outboundsPath, selector, result.Added, result.Replaced, result.Removed); err == nil {
 			result.Live = true
 			return result, nil
 		} else {
@@ -210,30 +213,31 @@ func hasService(services interface{}, want string) bool {
 	return false
 }
 
-// applyPoolLive pushes the new pool into the running core: every tag that stays
-// is removed and re-added (its endpoint may have changed), and tags that are
-// gone are dropped.
-func applyPoolLive(rt Runtime, apiAddr, outboundsPath, selector string, replaced, removed []string) error {
+// applyPoolLive pushes only the difference into the running core: tags that are
+// gone are dropped, tags whose endpoint changed are replaced, new tags added.
+//
+// Untouched tags are deliberately left alone — removing an outbound closes the
+// connections riding on it, which is what a refresh must avoid.
+func applyPoolLive(rt Runtime, apiAddr, outboundsPath, selector string, added, replaced, removed []string) error {
 	if rt.Core != CoreXray {
 		return fmt.Errorf("горячее обновление доступно только для xray")
 	}
 	if apiAddr == "" {
 		return fmt.Errorf("адрес api не задан")
 	}
+	if len(added)+len(replaced)+len(removed) == 0 {
+		return nil
+	}
 
-	nodes, err := poolNodesInFile(outboundsPath, selector)
+	// Remove first: adding an outbound whose tag is already registered fails.
+	// Only tags the core already knows are removed — `rmo` on an unknown tag errors.
+	if err := RemoveOutbounds(rt, apiAddr, concat(removed, replaced)); err != nil {
+		return err
+	}
+
+	toAdd, err := poolNodesWithTags(outboundsPath, selector, concat(added, replaced))
 	if err != nil {
 		return err
-	}
-
-	// Remove first: adding an outbound whose tag is already registered fails
-	if err := RemoveOutbounds(rt, apiAddr, append(append([]string{}, removed...), replaced...)); err != nil {
-		return err
-	}
-
-	var toAdd []interface{}
-	for _, node := range nodes {
-		toAdd = append(toAdd, node)
 	}
 
 	if err := AddOutbounds(rt, apiAddr, toAdd); err != nil {
@@ -243,6 +247,64 @@ func applyPoolLive(rt Runtime, apiAddr, outboundsPath, selector string, replaced
 	}
 
 	return nil
+}
+
+// poolNodesWithTags returns the config's outbounds for the given tags.
+func poolNodesWithTags(path, selector string, tags []string) ([]interface{}, error) {
+	if len(tags) == 0 {
+		return nil, nil
+	}
+
+	wanted := make(map[string]bool, len(tags))
+	for _, tag := range tags {
+		wanted[tag] = true
+	}
+
+	nodes, err := poolNodesInFile(path, selector)
+	if err != nil {
+		return nil, err
+	}
+
+	var picked []interface{}
+	for _, node := range nodes {
+		if tag, _ := node["tag"].(string); wanted[tag] {
+			picked = append(picked, node)
+		}
+	}
+
+	return picked, nil
+}
+
+// tagsMissingFrom lists tags present in a but not in b.
+func tagsMissingFrom(a, b PoolLayout) []string {
+	var missing []string
+	for tag := range a {
+		if _, present := b[tag]; !present {
+			missing = append(missing, tag)
+		}
+	}
+	sort.Strings(missing)
+	return missing
+}
+
+// changedTags lists tags present in both layouts whose endpoint differs.
+func changedTags(before, after PoolLayout) []string {
+	var changed []string
+	for tag, oldEP := range before {
+		if newEP, present := after[tag]; present && newEP != oldEP {
+			changed = append(changed, tag)
+		}
+	}
+	sort.Strings(changed)
+	return changed
+}
+
+func concat(lists ...[]string) []string {
+	var all []string
+	for _, list := range lists {
+		all = append(all, list...)
+	}
+	return all
 }
 
 // poolNodesInFile returns the pool outbounds currently written to the config.

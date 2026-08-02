@@ -59,7 +59,7 @@ func EnablePool(rt Runtime, outboundsPath string, servers []models.Server, opts 
 	}
 	originalTag := outboundTag(template)
 
-	nodes, err := BuildPoolOutbounds(SelectPoolServers(servers, opts.Selection), selector, template)
+	nodes, err := BuildPoolOutbounds(SelectPoolServers(servers, opts.Selection), selector, template, nil)
 	if err != nil {
 		return state, err
 	}
@@ -195,8 +195,13 @@ func SyncPool(rt Runtime, outboundsPath string, servers []models.Server, state P
 		return fmt.Errorf("outbounds не найдены в %s", outboundsPath)
 	}
 
+	layout, err := ReadPoolLayout(outboundsPath, state.Selector)
+	if err != nil {
+		return err
+	}
+
 	_, template := findProxyOutbound(outbounds)
-	nodes, err := BuildPoolOutbounds(SelectPoolServers(servers, sel), state.Selector, template)
+	nodes, err := BuildPoolOutbounds(SelectPoolServers(servers, sel), state.Selector, template, layout)
 	if err != nil {
 		return err
 	}

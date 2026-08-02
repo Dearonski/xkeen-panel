@@ -218,7 +218,7 @@ func runSubscriptionRefresh(ctx context.Context, cfg *models.Config, sm *xkeen.S
 					wd.Log("[AUTO-UPDATE] Пул не синхронизирован: %v", err)
 				case res.Changed:
 					det.InvalidateTopology()
-					wd.Log("[AUTO-UPDATE] Пул обновлён: +%d, -%d%s", len(res.Added), len(res.Removed), liveSuffix(res))
+					wd.Log("[AUTO-UPDATE] Пул обновлён: +%d, -%d, заменено %d%s", len(res.Added), len(res.Removed), len(res.Replaced), liveSuffix(res))
 				}
 			} else if active != nil && newURI != prevURI {
 				// Single-outbound mode: the active server left the subscription.

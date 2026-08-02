@@ -24,6 +24,10 @@ type PoolSelection struct {
 	GeoIP            *geoip.Matcher
 	ProbeTimeout     time.Duration
 	ProbeConcurrency int
+
+	// Keep holds the endpoints already in the pool. They stay in it as long as
+	// they answer, so ordinary latency jitter cannot reshuffle membership.
+	Keep map[endpoint]bool
 }
 
 // SelectPoolServers filters and ranks the subscription for pool membership:
@@ -57,11 +61,37 @@ func SelectPoolServers(servers []models.Server, sel PoolSelection) []models.Serv
 	}
 
 	ranked := sel.rankByLatency(allowed)
+	ranked = sel.incumbentsFirst(ranked)
 	if len(ranked) > max {
 		ranked = ranked[:max]
 	}
 
 	return ranked
+}
+
+// incumbentsFirst moves servers already in the pool ahead of newcomers, keeping
+// each group in latency order.
+//
+// Ranking purely by latency meant a node could drop out of the pool because a
+// measurement wobbled by a few milliseconds. Every such reshuffle rewrote the
+// pool, and replacing an outbound in the running core closes the connections it
+// carries — long-lived ones like a Telegram session do not survive that.
+func (sel PoolSelection) incumbentsFirst(servers []models.Server) []models.Server {
+	if len(sel.Keep) == 0 {
+		return servers
+	}
+
+	var incumbents, newcomers []models.Server
+	for _, server := range servers {
+		ep, ok := endpointOfServer(server)
+		if ok && sel.Keep[ep] && server.Latency >= 0 {
+			incumbents = append(incumbents, server)
+			continue
+		}
+		newcomers = append(newcomers, server)
+	}
+
+	return append(incumbents, newcomers...)
 }
 
 // rankByLatency probes the candidates and puts the responding ones first.
@@ -133,4 +163,11 @@ func PoolSelectionFromConfig(cfg *models.Config, matcher *geoip.Matcher) PoolSel
 		ProbeTimeout:     time.Duration(cfg.ProbeTimeoutMs) * time.Millisecond,
 		ProbeConcurrency: cfg.ProbeConcurrency,
 	}
+}
+
+// WithCurrentPool tells the selection which endpoints are already in the pool,
+// so they are preferred over equally good newcomers.
+func (sel PoolSelection) WithCurrentPool(layout PoolLayout) PoolSelection {
+	sel.Keep = layout.Endpoints()
+	return sel
 }
