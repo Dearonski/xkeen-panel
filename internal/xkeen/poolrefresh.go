@@ -65,14 +65,14 @@ func RefreshPool(rt Runtime, outboundsPath, apiAddr string, servers []models.Ser
 	result.Added = missingFrom(after, before)
 	result.Removed = missingFrom(before, after)
 
-	// A pool built by an older panel has an api block without HandlerService, so
-	// the hot path would fail every time until the file is upgraded
-	upgraded, err := ensureHandlerService(state.APIFile)
+	// A pool built by an older panel has an api block that never listened, so the
+	// hot path would fail every time until the file is migrated
+	upgraded, err := ensureAPIConfig(state.APIFile, apiAddr)
 	if err != nil {
 		log.Printf("[POOL] Не удалось обновить api-блок: %v", err)
 	}
 	if upgraded {
-		log.Printf("[POOL] В api-блок добавлен HandlerService — применяю перезапуском")
+		log.Printf("[POOL] api-блок приведён к текущей форме — применяю перезапуском")
 	}
 
 	// Probe load scales with pool size, so a pool that shrank or grew may need a
@@ -135,10 +135,27 @@ func updateObservatoryInterval(rt Runtime, selector string, nodes int) (bool, er
 	return true, nil
 }
 
-// ensureHandlerService adds HandlerService to an api block the panel created.
+// EnsureAPIConfig migrates the api block on startup.
+//
+// A pool whose subscription has not drifted never reaches the refresh path, so
+// an install carrying the old non-listening api block would keep failing to pin
+// forever. Returns true when the file changed and the core has to be restarted.
+func EnsureAPIConfig(state PoolState, apiAddr string) (bool, error) {
+	if !state.Enabled {
+		return false, nil
+	}
+	return ensureAPIConfig(state.APIFile, apiAddr)
+}
+
+// ensureAPIConfig brings an api block the panel created up to the current shape.
 // Only our own file is touched: a block from `xkeen -sb on` belongs to XKeen.
-func ensureHandlerService(apiPath string) (bool, error) {
-	if apiPath == "" {
+//
+// Two migrations happen here. Early pools asked only for RoutingService, which
+// is not enough to swap outbounds in a running core. And the original recipe
+// bound the port through a dokodemo-door inbound plus a routing rule, which did
+// not actually listen — `api.listen` replaces both.
+func ensureAPIConfig(apiPath, apiAddr string) (bool, error) {
+	if apiPath == "" || apiAddr == "" {
 		return false, nil
 	}
 
@@ -152,20 +169,45 @@ func ensureHandlerService(apiPath string) (bool, error) {
 		return false, nil
 	}
 
-	for _, service := range asSlice(api["services"]) {
-		if name, _ := service.(string); name == "HandlerService" {
-			return false, nil
-		}
+	changed := false
+
+	if listen, _ := api["listen"].(string); listen != apiAddr {
+		api["listen"] = apiAddr
+		changed = true
 	}
 
-	api["services"] = append(asSlice(api["services"]), "HandlerService")
-	cfg["api"] = api
+	if !hasService(api["services"], "HandlerService") {
+		api["services"] = append(asSlice(api["services"]), "HandlerService")
+		changed = true
+	}
 
+	// The inbound and its rule only existed to reach the api tag; with a direct
+	// listener they are dead weight, and the inbound confuses XKeen's port scan
+	if _, present := cfg["inbounds"]; present {
+		delete(cfg, "inbounds")
+		delete(cfg, "routing")
+		changed = true
+	}
+
+	if !changed {
+		return false, nil
+	}
+
+	cfg["api"] = api
 	if err := WriteOutboundsConfig(apiPath, cfg); err != nil {
 		return false, err
 	}
 
 	return true, nil
+}
+
+func hasService(services interface{}, want string) bool {
+	for _, service := range asSlice(services) {
+		if name, _ := service.(string); name == want {
+			return true
+		}
+	}
+	return false
 }
 
 // applyPoolLive pushes the new pool into the running core: every tag that stays

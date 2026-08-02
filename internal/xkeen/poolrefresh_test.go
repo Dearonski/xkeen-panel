@@ -88,41 +88,61 @@ func TestRefreshPoolReportsAddedAndRemoved(t *testing.T) {
 	}
 }
 
-// Pinning needs RoutingService and hot pool updates need HandlerService; a pool
-// created before HandlerService existed must be upgraded in place.
-func TestEnsureHandlerServiceUpgradesOldAPIBlock(t *testing.T) {
+// The first api block the panel wrote bound its port through a dokodemo-door
+// inbound and a routing rule, and never actually listened — `xray api` failed
+// with "failed to dial". Such a file has to be migrated in place.
+func TestEnsureAPIConfigMigratesOldBlock(t *testing.T) {
 	path := filepath.Join(t.TempDir(), apiConfigFile)
-	old := `{"api":{"tag":"api","services":["RoutingService"]},"inbounds":[]}`
+	old := `{"api":{"tag":"api","services":["RoutingService"]},
+		"inbounds":[{"tag":"api-in","listen":"127.0.0.1","port":10085,"protocol":"dokodemo-door"}],
+		"routing":{"rules":[{"inboundTag":["api-in"],"outboundTag":"api"}]}}`
 	if err := os.WriteFile(path, []byte(old), 0644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
-	upgraded, err := ensureHandlerService(path)
+	upgraded, err := ensureAPIConfig(path, "127.0.0.1:10085")
 	if err != nil {
-		t.Fatalf("ensureHandlerService: %v", err)
+		t.Fatalf("ensureAPIConfig: %v", err)
 	}
 	if !upgraded {
-		t.Fatal("upgrade not reported")
+		t.Fatal("migration not reported")
 	}
 
 	var cfg map[string]interface{}
 	if err := ReadJSONC(path, &cfg); err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	services := cfg["api"].(map[string]interface{})["services"].([]interface{})
-	if len(services) != 2 || services[0] != "RoutingService" || services[1] != "HandlerService" {
-		t.Errorf("services = %v, want both", services)
+
+	api := cfg["api"].(map[string]interface{})
+	if api["listen"] != "127.0.0.1:10085" {
+		t.Errorf("listen = %v, want the api address — without it Xray binds nothing", api["listen"])
+	}
+	if !hasService(api["services"], "HandlerService") {
+		t.Errorf("services = %v, want HandlerService for hot pool updates", api["services"])
+	}
+	// The inbound would otherwise be picked up by XKeen's transparent-port scan
+	if _, still := cfg["inbounds"]; still {
+		t.Error("obsolete inbound left behind")
+	}
+	if _, still := cfg["routing"]; still {
+		t.Error("obsolete routing rule left behind")
 	}
 
 	// Second call must be a no-op
-	if again, _ := ensureHandlerService(path); again {
-		t.Error("already-upgraded block reported as changed")
+	if again, _ := ensureAPIConfig(path, "127.0.0.1:10085"); again {
+		t.Error("already-migrated block reported as changed")
 	}
 }
 
-func TestEnsureHandlerServiceIgnoresForeignBlock(t *testing.T) {
-	if upgraded, err := ensureHandlerService(""); upgraded || err != nil {
+func TestEnsureAPIConfigIgnoresForeignBlock(t *testing.T) {
+	if upgraded, err := ensureAPIConfig("", "127.0.0.1:10085"); upgraded || err != nil {
 		t.Errorf("upgraded=%v err=%v, want a no-op when the panel does not own the file", upgraded, err)
+	}
+}
+
+func TestEnsureAPIConfigSkipsDisabledPool(t *testing.T) {
+	if upgraded, err := EnsureAPIConfig(PoolState{Enabled: false, APIFile: "/nope"}, "127.0.0.1:10085"); upgraded || err != nil {
+		t.Errorf("upgraded=%v err=%v, want a no-op without a pool", upgraded, err)
 	}
 }
 
@@ -139,12 +159,19 @@ func TestNewPoolWritesHandlerService(t *testing.T) {
 		t.Fatalf("read api config: %v", err)
 	}
 
-	services := cfg["api"].(map[string]interface{})["services"].([]interface{})
+	api := cfg["api"].(map[string]interface{})
+	services := api["services"].([]interface{})
 	found := map[string]bool{}
 	for _, s := range services {
 		found[s.(string)] = true
 	}
 	if !found["RoutingService"] || !found["HandlerService"] {
 		t.Errorf("services = %v, want RoutingService and HandlerService", services)
+	}
+	if api["listen"] != "127.0.0.1:10085" {
+		t.Errorf("listen = %v, want Xray to bind the port itself", api["listen"])
+	}
+	if _, present := cfg["inbounds"]; present {
+		t.Error("a listening api block needs no dokodemo-door inbound")
 	}
 }

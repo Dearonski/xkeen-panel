@@ -26,24 +26,21 @@ func TestEnablePoolWritesAPIConfig(t *testing.T) {
 		t.Fatalf("read api config: %v", err)
 	}
 
-	inbound := cfg["inbounds"].([]interface{})[0].(map[string]interface{})
-	settings := inbound["settings"].(map[string]interface{})
+	api := cfg["api"].(map[string]interface{})
 
-	// XKeen derives the transparent proxy ports from dokodemo-door inbounds that
-	// carry followRedirect — the api inbound must not look like one of them
-	if _, present := settings["followRedirect"]; present {
-		t.Error("api inbound must not set followRedirect: XKeen would treat it as a redirect entry point")
+	// Xray binds the port itself; the older recipe went through a dokodemo-door
+	// inbound and a routing rule, and never actually listened
+	if api["listen"] != "127.0.0.1:10085" {
+		t.Errorf("listen = %v, want 127.0.0.1:10085", api["listen"])
 	}
-	if inbound["listen"] != "127.0.0.1" {
-		t.Errorf("listen = %v, want 127.0.0.1 — the api port must not be reachable from the LAN", inbound["listen"])
+	if api["tag"] != "api" {
+		t.Errorf("tag = %v, want api", api["tag"])
 	}
-	if got := inbound["port"]; got != float64(10085) {
-		t.Errorf("port = %v, want 10085", got)
+	if _, present := cfg["inbounds"]; present {
+		t.Error("a listening api block needs no inbound — XKeen scans inbounds for transparent ports")
 	}
-
-	rule := cfg["routing"].(map[string]interface{})["rules"].([]interface{})[0].(map[string]interface{})
-	if rule["outboundTag"] != "api" {
-		t.Errorf("api rule outboundTag = %v, want api", rule["outboundTag"])
+	if _, present := cfg["routing"]; present {
+		t.Error("a listening api block needs no routing rule")
 	}
 }
 

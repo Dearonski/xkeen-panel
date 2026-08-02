@@ -148,37 +148,21 @@ var apiServices = []interface{}{"RoutingService", "HandlerService"}
 // the Beta channel — on Stable the panel has to provide it itself, or pinning a
 // node by hand is impossible.
 //
-// The inbound deliberately omits `settings.followRedirect`: XKeen scans
-// dokodemo-door inbounds that have it to derive the transparent proxy ports, so
-// an api inbound carrying it would be mistaken for a redirect entry point.
+// `api.listen` makes Xray bind the port itself. The older recipe — a
+// dokodemo-door inbound plus a routing rule pointing at the api tag — depends on
+// rule ordering across merged config files and adds an inbound that XKeen scans
+// when deriving the transparent proxy ports. Xray reports the outcome as
+// "API server listening on …", so a failure is visible in its log.
 func apiConfigDoc(apiAddr string) (map[string]interface{}, error) {
-	host, port, err := splitAPIAddr(apiAddr)
-	if err != nil {
+	if _, _, err := splitAPIAddr(apiAddr); err != nil {
 		return nil, err
 	}
 
 	return map[string]interface{}{
 		"api": map[string]interface{}{
 			"tag":      "api",
+			"listen":   apiAddr,
 			"services": apiServices,
-		},
-		"inbounds": []interface{}{
-			map[string]interface{}{
-				"tag":      "api-in",
-				"listen":   host,
-				"port":     port,
-				"protocol": "dokodemo-door",
-				"settings": map[string]interface{}{"address": host},
-			},
-		},
-		"routing": map[string]interface{}{
-			"rules": []interface{}{
-				map[string]interface{}{
-					"type":        "field",
-					"inboundTag":  []interface{}{"api-in"},
-					"outboundTag": "api",
-				},
-			},
 		},
 	}, nil
 }

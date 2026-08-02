@@ -61,6 +61,15 @@ func main() {
 		log.Printf("Предупреждение: не удалось загрузить состояние пула: %v", err)
 	}
 
+	// An install from before the api block was fixed cannot pin a pool node until
+	// the file is migrated, and a pool in sync never reaches the refresh path
+	if migrated, err := xkeen.EnsureAPIConfig(poolStore.Get(), cfg.XrayAPIAddr); err != nil {
+		log.Printf("Не удалось обновить api-блок Xray: %v", err)
+	} else if migrated {
+		log.Printf("api-блок Xray приведён к текущей форме — перезапускаю ядро")
+		xkeen.Restart(rt.Dispatcher)
+	}
+
 	// Watchdog and SSE
 	watchdog := monitor.NewWatchdog(cfg, subManager, detector)
 	eventBus := sse.NewEventBus()
