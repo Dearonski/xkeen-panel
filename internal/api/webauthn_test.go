@@ -6,7 +6,7 @@ func TestKeenDNSOrigins(t *testing.T) {
 	o := keenDNSOrigins("xkeen.example.link")
 
 	if len(o) != 6 {
-		t.Fatalf("ожидалось 6 origin, got %d: %v", len(o), o)
+		t.Fatalf("got %d origins, want 6: %v", len(o), o)
 	}
 
 	got := map[string]bool{}
@@ -19,7 +19,7 @@ func TestKeenDNSOrigins(t *testing.T) {
 		"https://xkeen.example.link:5443",
 	} {
 		if !got[want] {
-			t.Errorf("нет origin %q в %v", want, o)
+			t.Errorf("origin %q missing from %v", want, o)
 		}
 	}
 }

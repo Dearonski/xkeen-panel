@@ -1,6 +1,6 @@
 .PHONY: dev dev-backend dev-frontend build-frontend build-arm64 build-mipsel build-all build-local clean deploy-disk deploy-ssh
 
-# === Разработка ===
+# === Development ===
 
 dev:
 	make -j2 dev-backend dev-frontend
@@ -11,7 +11,7 @@ dev-backend:
 dev-frontend:
 	cd frontend && npm run dev
 
-# === Продакшен билд ===
+# === Production build ===
 
 # The tag is the only source of the version; the updater compares against it
 VERSION ?= $(shell git describe --tags --dirty 2>/dev/null || echo dev)
@@ -39,9 +39,9 @@ build-all: build-frontend
 build-local: build-frontend
 	go build -ldflags="$(LDFLAGS)" -o build/xkeen-panel .
 
-# === Деплой ===
+# === Deploy ===
 
-# Диск роутера = /opt/ на роутере
+# The router disk is /opt/ on the router
 ROUTER_DISK ?= /Volumes/bc89cc32-b398-4623-8c4a-e166db166e0c
 
 deploy-disk: build-arm64
@@ -52,8 +52,8 @@ deploy-disk: build-arm64
 
 ROUTER_SSH ?= root@192.168.1.1
 
-# Конфиг не копируется: на роутере в нём живут webauthn_rp_id и прочие
-# настройки установки, которые затирать нельзя
+# The config is not copied: on the router it holds webauthn_rp_id and other
+# install-specific settings that must not be overwritten
 deploy-ssh: build-arm64
 	ssh $(ROUTER_SSH) '/opt/etc/init.d/S99xkeen-panel stop' || true
 	scp build/xkeen-panel-aarch64 $(ROUTER_SSH):/opt/sbin/xkeen-panel

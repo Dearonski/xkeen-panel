@@ -26,7 +26,7 @@ func TestParseSubscriptionPlaintext(t *testing.T) {
 		t.Fatalf("ParseSubscription: %v", err)
 	}
 	if len(servers) != 4 {
-		t.Fatalf("серверов = %d, want 4", len(servers))
+		t.Fatalf("servers = %d, want 4", len(servers))
 	}
 
 	want := []struct {
@@ -56,7 +56,7 @@ func TestParseSubscriptionPlaintext(t *testing.T) {
 			t.Errorf("server[%d].Country = %q, want %q", i, s.Country, w.country)
 		}
 		if s.RawURI == "" {
-			t.Errorf("server[%d].RawURI пуст", i)
+			t.Errorf("server[%d].RawURI is empty", i)
 		}
 	}
 }
@@ -68,12 +68,12 @@ func TestParseSubscriptionBase64(t *testing.T) {
 		t.Fatalf("ParseSubscription(base64): %v", err)
 	}
 	if len(servers) != 4 {
-		t.Fatalf("серверов = %d, want 4", len(servers))
+		t.Fatalf("servers = %d, want 4", len(servers))
 	}
 }
 
 func TestParseSubscriptionEmpty(t *testing.T) {
 	if _, err := ParseSubscription("no valid links here"); err == nil {
-		t.Error("ожидалась ошибка при отсутствии серверов")
+		t.Error("want an error when there are no servers")
 	}
 }

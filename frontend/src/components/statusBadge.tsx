@@ -11,7 +11,7 @@ export function StatusBadge({
 }) {
     return (
         <div className='flex items-center gap-3'>
-            {/* Статус xray-процесса */}
+            {/* xray process status */}
             <div className='flex items-center gap-1.5'>
                 <div
                     className={cn(
@@ -26,7 +26,7 @@ export function StatusBadge({
                 </span>
             </div>
 
-            {/* Статус соединения */}
+            {/* Connection status */}
             <div className='flex items-center gap-1.5'>
                 <div
                     className={cn(

@@ -15,6 +15,6 @@ func TestWalkOverflowNoPanic(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := Load(p, []string{"RU"}); err == nil {
-		t.Error("ожидалась ошибка на битом geoip.dat (а не паника)")
+		t.Error("want an error on a corrupt geoip.dat (not a panic)")
 	}
 }

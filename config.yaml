@@ -1,13 +1,13 @@
-# Порт веб-панели
+# Web panel port
 port: 3000
 
-# Папка для данных (user.json, subscription.json)
+# Data directory (user.json, subscription.json)
 data_dir: /opt/etc/xkeen-panel/data
 
-# === Пути XKeen/Xray ===
-# Раскладка определяется автоматически: XKeen 2.x (S05xkeen) и 1.x (S24xray),
-# ядро (xray/mihomo) и режим проксирования. Задавать что-то ниже нужно только
-# при нестандартной установке.
+# === XKeen/Xray paths ===
+# The layout is detected automatically: XKeen 2.x (S05xkeen) and 1.x (S24xray),
+# the core (xray/mihomo) and the proxying mode. Set anything below only for a
+# non-standard install.
 xkeen_path: /opt/sbin/xkeen
 outbounds_file: /opt/etc/xray/configs/04_outbounds.json
 # xray_config_dir: /opt/etc/xray/configs
@@ -17,66 +17,66 @@ outbounds_file: /opt/etc/xray/configs/04_outbounds.json
 # xray_api_addr: 127.0.0.1:10085
 
 # === Watchdog ===
-check_interval: 120        # Интервал проверки в секундах
+check_interval: 120        # Check interval, seconds
 check_url: https://www.google.com
-max_fails: 3               # Фейлов подряд до переключения
+max_fails: 3               # Consecutive failures before switching
 
-# Лог-файл watchdog'а
+# Watchdog log file
 log_file: /opt/var/log/xkeen-panel.log
 
-# === Автопилот ===
-probe_timeout_ms: 2000          # Таймаут TCP-пинга сервера
-probe_concurrency: 20           # Лимит одновременных пингов (важно для роутера)
-latency_auto_switch: true       # Переключаться при высоком пинге, а не только при обрыве
-latency_threshold_ms: 1000      # Порог высокого пинга
-latency_switch_count: 3         # Сколько проверок подряд выше порога до переключения
-blacklist_ttl_sec: 300          # На сколько исключать сервер после фейловера
-watchdog_auto_start: true       # Включать watchdog автоматически при старте
+# === Autopilot ===
+probe_timeout_ms: 2000          # TCP ping timeout per server
+probe_concurrency: 20           # Concurrent ping limit (matters on a router)
+latency_auto_switch: true       # Switch on high latency, not only on a dropped link
+latency_threshold_ms: 1000      # High latency threshold
+latency_switch_count: 3         # Consecutive checks above the threshold before switching
+blacklist_ttl_sec: 300          # How long a server stays excluded after a failover
+watchdog_auto_start: true       # Start the watchdog automatically on boot
 
-# Автообновление подписки (секунды, 0 = выключено). В режиме пула по этому же
-# таймеру пул приводится к подписке: провайдер меняет сервера, и устаревший пул
-# отправляет трафик на мёртвые ноды. Обновление применяется через api Xray без
-# перезапуска, поэтому интервал можно держать небольшим.
+# Subscription auto-refresh (seconds, 0 = off). In pool mode the same timer
+# brings the pool in line with the subscription: providers rotate servers, and a
+# stale pool sends traffic to dead nodes. The update is applied through the Xray
+# api without a restart, so the interval can stay short.
 subscription_refresh_interval: 1800
 
-# Сколько нод держать в пуле балансировщика. Каждую ноду Xray пробует
-# отдельно (observatory), поэтому пул из всей подписки — это постоянные
-# handshake'и на роутере. Панель берёт лучшие по пингу, исключая страны из
-# auto_switch_avoid_countries.
+# How many nodes the balancer pool holds. Xray probes every node separately
+# (observatory), so a pool of the whole subscription means constant handshakes
+# on the router. The panel takes the lowest-latency ones, excluding countries
+# from auto_switch_avoid_countries.
 pool_max_nodes: 10
 
-# Трафик закрепляется за одной нодой пула: балансировщик выбирает outbound на
-# каждое соединение, из-за чего внешний IP скачет — и рвутся сессии Telegram,
-# а CDN отвечает 403. Панель проверяет через активную ноду реальные сервисы и
-# меняет её, если через неё перестаёт работать несколько из них.
-health_check_every: 5           # раз в сколько циклов watchdog делать проверку
-health_fail_threshold: 2        # неудач одного сервиса подряд, чтобы счесть его битым
-health_quorum: 2                # сколько сервисов должны отвалиться, чтобы менять ноду
-# Проверка не чаще раза в 30 минут меняет ноду: сервис, который блокирует все
-# датацентровые IP, иначе гонял бы пул по кругу.
-# health_check_urls:            # по умолчанию: cloudflare, telegram, youtube, soundcloud
+# Traffic is pinned to one pool node: the balancer picks an outbound per
+# connection, so the external IP keeps moving — Telegram sessions drop and CDNs
+# answer 403. The panel probes real services through the active node and
+# replaces it once several of them stop working through it.
+health_check_every: 5           # Probe every N watchdog cycles
+health_fail_threshold: 2        # Consecutive failures of one service to count it as broken
+health_quorum: 2                # How many services must fail before the node is replaced
+# The check replaces the node at most once every 30 minutes: a service that
+# blocks every datacenter IP would otherwise cycle the pool forever.
+# health_check_urls:            # default: cloudflare, telegram, youtube, soundcloud
 #   - https://www.cloudflare.com/cdn-cgi/trace
 #   - https://web.telegram.org/
 
-# === Гео-избегание при автопереключении ===
-# Используем geoip.dat, который уже стоит для Xray
+# === Geo-avoidance for automatic switching ===
+# Reuses the geoip.dat already installed for Xray
 geoip_path: /opt/etc/xray/dat/geoip_v2fly.dat
-auto_switch_avoid_countries:    # Не переключаться автоматически на серверы этих стран
+auto_switch_avoid_countries:    # Never switch automatically to servers in these countries
   - RU
   - BY
 
-# Доверять заголовкам прокси (X-Forwarded-For/Host/Proto). Включай ТОЛЬКО если
-# панель за доверенным HTTPS-прокси, который их перезаписывает. Влияет на
-# rate-limit (иначе IP можно подделать) и на автовывод RP для passkey.
+# Trust proxy headers (X-Forwarded-For/Host/Proto). Enable ONLY when the panel
+# sits behind a trusted HTTPS proxy that rewrites them. Affects rate limiting
+# (otherwise the IP can be spoofed) and passkey RP derivation.
 trust_proxy_headers: false
 
 # === Passkey (WebAuthn) ===
-# Достаточно задать домен — passkey автоматически разрешается на стандартных
-# HTTPS-портах KeenDNS (443 без порта + 8443/5443/8083/5083/65083), так что
-# работает и локально, и через облако с :8443.
+# Setting the domain is enough — passkeys are then allowed on the standard
+# KeenDNS HTTPS ports (443 without a port + 8443/5443/8083/5083/65083), so they
+# work both locally and through the cloud on :8443.
 # webauthn_rp_id: xkeen.superwifi.netcraze.link
 # webauthn_rp_name: XKeen Panel
-# webauthn_origins:        # необязательно — переопределить список origin вручную
+# webauthn_origins:        # optional — override the origin list by hand
 #   - https://xkeen.superwifi.netcraze.link
-# Если домен задать нельзя — trust_proxy_headers: true, и RP выведется из
-# X-Forwarded-Host (только за доверенным прокси!).
+# If the domain cannot be set — trust_proxy_headers: true, and the RP is derived
+# from X-Forwarded-Host (only behind a trusted proxy!).

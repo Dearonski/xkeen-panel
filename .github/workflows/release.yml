@@ -32,10 +32,10 @@ jobs:
         env:
           LDFLAGS: -s -w -X xkeen-panel/internal/version.Version=${{ github.ref_name }}
         run: |
-          # aarch64 (Keenetic Giga, Ultra, Peak, Hopper и др.)
+          # aarch64 (Keenetic Giga, Ultra, Peak, Hopper and others)
           GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="$LDFLAGS" -o build/xkeen-panel-aarch64 .
 
-          # mipsel (Keenetic старых серий)
+          # mipsel (older Keenetic series)
           GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -trimpath -ldflags="$LDFLAGS" -o build/xkeen-panel-mipsel .
 
       # The panel refuses to update itself from a release without this file

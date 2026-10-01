@@ -20,12 +20,12 @@ func TestGenerateValidateToken(t *testing.T) {
 func TestValidateTokenWrongSecret(t *testing.T) {
 	token, _ := GenerateToken("bob", "secret-key")
 	if _, err := ValidateToken(token, "other-secret"); err == nil {
-		t.Error("ожидалась ошибка для неверного секрета")
+		t.Error("want an error for a wrong secret")
 	}
 }
 
 func TestValidateTokenGarbage(t *testing.T) {
 	if _, err := ValidateToken("not-a-token", "secret"); err == nil {
-		t.Error("ожидалась ошибка для мусора")
+		t.Error("want an error for garbage")
 	}
 }

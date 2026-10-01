@@ -14,21 +14,21 @@ func TestRateLimiterAllow(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		if !rl.Allow("1.1.1.1") {
-			t.Fatalf("попытка %d должна быть разрешена", i+1)
+			t.Fatalf("attempt %d must be allowed", i+1)
 		}
 	}
 	if rl.Allow("1.1.1.1") {
-		t.Fatal("4-я попытка должна быть отклонена")
+		t.Fatal("the 4th attempt must be rejected")
 	}
 
 	// A different IP is counted independently
 	if !rl.Allow("2.2.2.2") {
-		t.Fatal("первая попытка с другого IP должна быть разрешена")
+		t.Fatal("the first attempt from another IP must be allowed")
 	}
 
 	rl.Reset("1.1.1.1")
 	if !rl.Allow("1.1.1.1") {
-		t.Fatal("после Reset попытка должна быть снова разрешена")
+		t.Fatal("after Reset an attempt must be allowed again")
 	}
 }
 
@@ -36,19 +36,19 @@ func TestRateLimiterWindowExpiry(t *testing.T) {
 	rl := NewRateLimiter(2, 50*time.Millisecond)
 
 	if !rl.Allow("9.9.9.9") {
-		t.Fatal("первая попытка должна быть разрешена")
+		t.Fatal("the first attempt must be allowed")
 	}
 	if !rl.Allow("9.9.9.9") {
-		t.Fatal("вторая попытка должна быть разрешена")
+		t.Fatal("the second attempt must be allowed")
 	}
 	if rl.Allow("9.9.9.9") {
-		t.Fatal("третья попытка должна быть отклонена")
+		t.Fatal("the third attempt must be rejected")
 	}
 
 	time.Sleep(70 * time.Millisecond)
 
 	if !rl.Allow("9.9.9.9") {
-		t.Fatal("после истечения окна попытка должна быть разрешена")
+		t.Fatal("an attempt must be allowed once the window expires")
 	}
 }
 
@@ -69,7 +69,7 @@ func TestClientIP(t *testing.T) {
 	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
 	req2.RemoteAddr = "9.9.9.9:111"
 	if got := clientIP(req2, true); got != "9.9.9.9:111" {
-		t.Errorf("trustProxy=true без XFF: got %q", got)
+		t.Errorf("trustProxy=true without XFF: got %q", got)
 	}
 }
 
@@ -84,7 +84,7 @@ func TestRateLimitMiddleware(t *testing.T) {
 	rec1 := httptest.NewRecorder()
 	handler.ServeHTTP(rec1, req1)
 	if rec1.Code != http.StatusOK {
-		t.Fatalf("первый запрос: ожидался 200, получен %d", rec1.Code)
+		t.Fatalf("first request: got %d, want 200", rec1.Code)
 	}
 
 	req2 := httptest.NewRequest(http.MethodGet, "/login", nil)
@@ -92,7 +92,7 @@ func TestRateLimitMiddleware(t *testing.T) {
 	rec2 := httptest.NewRecorder()
 	handler.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusTooManyRequests {
-		t.Fatalf("второй запрос: ожидался 429, получен %d", rec2.Code)
+		t.Fatalf("second request: got %d, want 429", rec2.Code)
 	}
 }
 
@@ -112,7 +112,7 @@ func TestAuthMiddleware(t *testing.T) {
 	um := newConfirmedUserManager(t)
 	user := um.GetUser()
 	if user == nil {
-		t.Fatal("ожидался настроенный пользователь")
+		t.Fatal("want a configured user")
 	}
 	token, err := auth.GenerateToken(user.Username, user.JWTSecret)
 	if err != nil {
@@ -129,10 +129,10 @@ func TestAuthMiddleware(t *testing.T) {
 		query      string
 		wantCode   int
 	}{
-		{"без токена", "", "", http.StatusUnauthorized},
-		{"валидный Bearer", "Bearer " + token, "", http.StatusOK},
-		{"токен в query param", "", "?token=" + token, http.StatusOK},
-		{"невалидный токен", "Bearer garbage", "", http.StatusUnauthorized},
+		{"no token", "", "", http.StatusUnauthorized},
+		{"valid Bearer", "Bearer " + token, "", http.StatusOK},
+		{"token in query param", "", "?token=" + token, http.StatusOK},
+		{"invalid token", "Bearer garbage", "", http.StatusUnauthorized},
 	}
 
 	for _, tt := range tests {
@@ -144,7 +144,7 @@ func TestAuthMiddleware(t *testing.T) {
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
 			if rec.Code != tt.wantCode {
-				t.Fatalf("ожидался код %d, получен %d", tt.wantCode, rec.Code)
+				t.Fatalf("got code %d, want %d", rec.Code, tt.wantCode)
 			}
 		})
 	}

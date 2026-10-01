@@ -64,10 +64,10 @@ func TestRefreshPreservesActiveByURI(t *testing.T) {
 
 	active := sm.GetActiveServer()
 	if active == nil || active.RawURI != uriB {
-		t.Fatalf("активный сервер сохранён по индексу, а не по URI: %+v", active)
+		t.Fatalf("active server kept by index, not by URI: %+v", active)
 	}
 	if got := sm.GetData().ActiveID; got != 2 {
-		t.Errorf("ActiveID = %d, want 2 (новый индекс B)", got)
+		t.Errorf("ActiveID = %d, want 2 (B's new index)", got)
 	}
 }
 
@@ -91,7 +91,7 @@ func TestRefreshActiveRemoved(t *testing.T) {
 	}
 	active := sm.GetActiveServer()
 	if active == nil || active.RawURI != uriA {
-		t.Fatalf("после удаления активного ожидался первый сервер, got %+v", active)
+		t.Fatalf("got %+v, want the first server once the active one is removed", active)
 	}
 }
 
@@ -112,10 +112,10 @@ func TestCarryOverrides(t *testing.T) {
 
 	s := findByURI(sm.GetServers(), uriB)
 	if s == nil {
-		t.Fatal("сервер B не найден после refresh")
+		t.Fatal("server B not found after refresh")
 	}
 	if s.CountryOverride != "NL" {
-		t.Errorf("CountryOverride = %q, want NL (перенос по RawURI)", s.CountryOverride)
+		t.Errorf("CountryOverride = %q, want NL (carried over by RawURI)", s.CountryOverride)
 	}
 }
 
@@ -142,15 +142,15 @@ func TestUpdateLatencies(t *testing.T) {
 
 	a := findByURI(got, uriA)
 	if a == nil || a.Latency != 11 || a.LastChecked.IsZero() {
-		t.Errorf("A: latency/lastChecked не сохранены: %+v", a)
+		t.Errorf("A: latency/lastChecked not stored: %+v", a)
 	}
 	c := findByURI(got, uriC)
 	if c == nil || c.Latency != 33 || c.LastChecked.IsZero() {
-		t.Errorf("C: latency/lastChecked не сохранены: %+v", c)
+		t.Errorf("C: latency/lastChecked not stored: %+v", c)
 	}
 	b := findByURI(got, uriB)
 	if b == nil || !b.LastChecked.IsZero() {
-		t.Errorf("B не должен был обновиться: %+v", b)
+		t.Errorf("B must not have been updated: %+v", b)
 	}
 }
 
@@ -169,10 +169,10 @@ func TestSetCountryOverride(t *testing.T) {
 	}
 
 	if err := sm.SetCountryOverride(99, "x"); err == nil {
-		t.Error("ожидалась ошибка для id вне диапазона")
+		t.Error("want an error for an out-of-range id")
 	}
 	if err := sm.SetCountryOverride(-1, "x"); err == nil {
-		t.Error("ожидалась ошибка для отрицательного id")
+		t.Error("want an error for a negative id")
 	}
 }
 
@@ -188,7 +188,7 @@ func TestSelectNext(t *testing.T) {
 		t.Fatalf("SelectNext: %v", err)
 	}
 	if next.RawURI != uriB || sm.GetData().ActiveID != 1 {
-		t.Errorf("после первого SelectNext ожидался B (id 1), got id %d", sm.GetData().ActiveID)
+		t.Errorf("after the first SelectNext got id %d, want B (id 1)", sm.GetData().ActiveID)
 	}
 
 	if _, err := sm.SelectNext(); err != nil {
@@ -214,12 +214,12 @@ func TestSetActiveBounds(t *testing.T) {
 	}
 
 	if _, err := sm.SetActive(-1); err == nil {
-		t.Error("ожидалась ошибка для id -1")
+		t.Error("want an error for id -1")
 	}
 	if _, err := sm.SetActive(3); err == nil {
-		t.Error("ожидалась ошибка для id 3 (всего 3 сервера)")
+		t.Error("want an error for id 3 (only 3 servers)")
 	}
 	if _, err := sm.SetActive(0); err != nil {
-		t.Errorf("SetActive(0): неожиданная ошибка %v", err)
+		t.Errorf("SetActive(0): unexpected error %v", err)
 	}
 }

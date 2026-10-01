@@ -135,7 +135,7 @@ func TestUpdateOutbound(t *testing.T) {
 		t.Errorf("outbounds[0] uuid = %v, want the URI uuid", uuid)
 	}
 	if _, ok := cfg["routing"]; ok {
-		t.Error("в конфиге не должно быть ключа routing")
+		t.Error("the config must not have a routing key")
 	}
 }
 
@@ -147,10 +147,10 @@ func TestUpdateOutboundGuards(t *testing.T) {
 	}
 
 	if err := UpdateOutbound(path, &models.Server{Protocol: "vmess", RawURI: "vmess://abc"}); err == nil {
-		t.Error("ожидалась ошибка для протокола vmess")
+		t.Error("want an error for the vmess protocol")
 	}
 	if err := UpdateOutbound(path, &models.Server{Protocol: "vless", RawURI: ""}); err == nil {
-		t.Error("ожидалась ошибка при пустом RawURI")
+		t.Error("want an error for an empty RawURI")
 	}
 }
 

@@ -35,7 +35,7 @@ func TestAllowedActiveOrBest(t *testing.T) {
 		{ID: 0, Name: "nl", Country: "NL", Protocol: "vless", RawURI: "u-nl", Active: true},
 	}, 0)
 	if got := NewWatchdog(cfg, subOk, xkeen.NewDetector(t.TempDir(), "", "", "", "", "", "")).AllowedActiveOrBest(); got == nil || got.Country != "NL" {
-		t.Errorf("ожидался активный NL, got %+v", got)
+		t.Errorf("got %+v, want the active NL", got)
 	}
 
 	// Active sits in an avoided country and there is no allowed replacement.
@@ -43,6 +43,6 @@ func TestAllowedActiveOrBest(t *testing.T) {
 		{ID: 0, Name: "ru", Country: "RU", Protocol: "vless", RawURI: "u-ru", Active: true},
 	}, 0)
 	if got := NewWatchdog(cfg, subRu, xkeen.NewDetector(t.TempDir(), "", "", "", "", "", "")).AllowedActiveOrBest(); got == nil || got.Country != "RU" {
-		t.Errorf("ожидался fallback на текущий RU, got %+v", got)
+		t.Errorf("got %+v, want a fallback to the current RU", got)
 	}
 }

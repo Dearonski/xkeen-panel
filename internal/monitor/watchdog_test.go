@@ -46,15 +46,15 @@ func TestBlacklist(t *testing.T) {
 	w.blacklistServer("uriA")
 
 	if !w.isBlacklisted("uriA") {
-		t.Fatal("uriA должен быть в чёрном списке")
+		t.Fatal("uriA must be blacklisted")
 	}
 	if w.isBlacklisted("other") {
-		t.Fatal("other не должен быть в чёрном списке")
+		t.Fatal("other must not be blacklisted")
 	}
 
 	w.ClearBlacklist("uriA")
 	if w.isBlacklisted("uriA") {
-		t.Fatal("uriA должен быть очищен из чёрного списка")
+		t.Fatal("uriA must be cleared from the blacklist")
 	}
 }
 
@@ -64,14 +64,14 @@ func TestBlacklistExpiry(t *testing.T) {
 	w.blacklist["x"] = time.Now().Add(-time.Second)
 
 	if w.isBlacklisted("x") {
-		t.Fatal("просроченная запись не должна считаться активной")
+		t.Fatal("an expired entry must not count as active")
 	}
 
 	w.mu.Lock()
 	_, exists := w.blacklist["x"]
 	w.mu.Unlock()
 	if exists {
-		t.Fatal("просроченная запись должна быть удалена из map")
+		t.Fatal("an expired entry must be removed from the map")
 	}
 }
 
@@ -80,7 +80,7 @@ func TestBlacklistTTLZero(t *testing.T) {
 
 	w.blacklistServer("uriZ")
 	if w.isBlacklisted("uriZ") {
-		t.Fatal("при TTL=0 blacklistServer должен быть no-op")
+		t.Fatal("with TTL=0 blacklistServer must be a no-op")
 	}
 }
 
@@ -151,16 +151,16 @@ func TestRotateLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	if int64(len(rotated)) > 256<<10 {
-		t.Fatalf("размер после ротации %d > %d", len(rotated), 256<<10)
+		t.Fatalf("size after rotation %d > %d", len(rotated), 256<<10)
 	}
 	if len(rotated) == 0 || len(rotated) >= len(original) {
-		t.Fatalf("неожиданный размер после ротации %d (исходный %d)", len(rotated), len(original))
+		t.Fatalf("unexpected size after rotation %d (original %d)", len(rotated), len(original))
 	}
 	if !bytes.HasSuffix(original, rotated) {
-		t.Fatal("содержимое после ротации должно быть суффиксом исходного")
+		t.Fatal("content after rotation must be a suffix of the original")
 	}
 	if before := original[len(original)-len(rotated)-1]; before != '\n' {
-		t.Fatalf("ротация не на границе строки, предыдущий байт = %q", before)
+		t.Fatalf("rotation is not on a line boundary, previous byte = %q", before)
 	}
 
 	smallPath := filepath.Join(dir, "small.log")
@@ -174,7 +174,7 @@ func TestRotateLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(got, small) {
-		t.Fatal("маленький файл не должен изменяться")
+		t.Fatal("a small file must not change")
 	}
 }
 

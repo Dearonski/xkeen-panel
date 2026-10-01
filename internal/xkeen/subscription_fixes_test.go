@@ -37,13 +37,13 @@ func TestSetActiveByRawURI(t *testing.T) {
 		t.Fatalf("SetActiveByRawURI: %v", err)
 	}
 	if s.RawURI != "vless://b@2.2.2.2:443#B" {
-		t.Errorf("активирован не тот сервер: %q", s.RawURI)
+		t.Errorf("wrong server activated: %q", s.RawURI)
 	}
 	if got := sm.GetActiveServer(); got == nil || got.RawURI != "vless://b@2.2.2.2:443#B" {
-		t.Error("активный сервер не установился")
+		t.Error("the active server was not set")
 	}
 	if _, err := sm.SetActiveByRawURI("vless://missing"); err == nil {
-		t.Error("ожидалась ошибка для несуществующего RawURI")
+		t.Error("want an error for an unknown RawURI")
 	}
 }
 
@@ -58,6 +58,6 @@ func TestGetDataDeepCopy(t *testing.T) {
 	d.Servers[0].Country = "MUTATED"
 
 	if got := sm.GetServers(); got[0].Country != "NL" {
-		t.Errorf("GetData вернул алиас: внутренний Country = %q, want NL", got[0].Country)
+		t.Errorf("GetData returned an alias: internal Country = %q, want NL", got[0].Country)
 	}
 }

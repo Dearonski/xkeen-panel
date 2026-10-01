@@ -47,9 +47,9 @@ type Config struct {
 	// Health probes of real services, used to catch an exit IP a CDN blocks
 	// while plain connectivity still works. One service per round, in rotation.
 	HealthCheckURLs     []string `yaml:"health_check_urls"`
-	HealthCheckEvery    int      `yaml:"health_check_every"`    // раз в N циклов watchdog
-	HealthFailThreshold int      `yaml:"health_fail_threshold"` // неудач одного сервиса подряд
-	HealthQuorum        int      `yaml:"health_quorum"`         // сколько сервисов должны отвалиться
+	HealthCheckEvery    int      `yaml:"health_check_every"`    // every N watchdog cycles
+	HealthFailThreshold int      `yaml:"health_fail_threshold"` // consecutive failures of one service
+	HealthQuorum        int      `yaml:"health_quorum"`         // how many services must fail
 
 	// Countries to avoid when switching automatically
 	GeoIPPath                string   `yaml:"geoip_path"`

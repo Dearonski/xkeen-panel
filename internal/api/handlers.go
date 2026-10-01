@@ -99,9 +99,10 @@ func (h *Handlers) HandleRefreshSubscription(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// refreshPool приводит пул к обновлённой подписке. Пул генерируется из URI
-// подписки, поэтому смена сервера у провайдера оставляет в нём мёртвый адрес —
-// и если протухли все ноды, балансировщику не из чего выбирать.
+// refreshPool brings the pool in line with the refreshed subscription. The pool
+// is generated from subscription URIs, so a provider rotating a server leaves a
+// dead address in it — and once every node goes stale, the balancer has nothing
+// left to choose from.
 func (h *Handlers) refreshPool(servers []models.Server) (xkeen.SyncResult, error) {
 	top := h.detector.Topology()
 	if top.Mode != xkeen.TopologyPool {

@@ -202,7 +202,7 @@ export function DashboardPage() {
 
     return (
         <div className='min-h-screen'>
-            {/* Баннер рестарта */}
+            {/* Restart banner */}
             {restarting && (
                 <div className='bg-amber-500/10 border-b border-amber-500/30 px-4 py-2.5 flex items-center justify-center gap-2 text-sm text-amber-400'>
                     <IconLoader2 className='size-4 animate-spin' />
@@ -222,7 +222,7 @@ export function DashboardPage() {
                     </Button>
                 </div>
             )}
-            {/* Шапка */}
+            {/* Header */}
             <header className='bg-card border-b sticky top-0 z-10'>
                 <div className='max-w-6xl mx-auto px-4 py-3 flex items-center justify-between'>
                     <div>
@@ -250,7 +250,7 @@ export function DashboardPage() {
                     </Button>
                 </div>
             </header>
-            {/* Контент */}
+            {/* Content */}
             <main className='max-w-6xl mx-auto px-4 py-4'>
                 <div className='grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-4'>
                     <div className='space-y-4'>
