@@ -15,6 +15,7 @@ import (
 	"time"
 	"xkeen-panel/internal/auth"
 	"xkeen-panel/internal/geoip"
+	"xkeen-panel/internal/localtz"
 	"xkeen-panel/internal/models"
 	"xkeen-panel/internal/monitor"
 	"xkeen-panel/internal/server"
@@ -38,6 +39,10 @@ func main() {
 	if *showVersion {
 		fmt.Println(version.Version)
 		return
+	}
+
+	if rule, ok := localtz.Apply("/etc/localtime"); ok {
+		log.Printf("Часовой пояс взят из /etc/localtime: %s", rule)
 	}
 
 	// Resolved now: once an update renames the running file, the link points at .prev
