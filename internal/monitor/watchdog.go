@@ -13,6 +13,7 @@ import (
 	"xkeen-panel/internal/geoip"
 	"xkeen-panel/internal/models"
 	"xkeen-panel/internal/sse"
+	"xkeen-panel/internal/version"
 	"xkeen-panel/internal/xkeen"
 )
 
@@ -266,8 +267,11 @@ func (w *Watchdog) superviseP(rt xkeen.Runtime, top xkeen.Topology) {
 		return
 	}
 
-	if xkeen.PinDrifted(w.config.OutboundsFile, w.selector(top), state.PinnedTag, state.PinnedNode) {
+	if xkeen.PinDrifted(w.config.OutboundsFile, top.Selector(), state.PinnedTag, state.PinnedNode) {
 		w.writeLog("[PIN] %s больше не ведёт на закреплённый сервер — выбираю заново", state.PinnedTag)
+		if state.PinManual {
+			w.dropManual("выбранный вручную сервер ушёл из пула после обновления подписки")
+		}
 		tag, err := w.pinBest(rt, top)
 		if err != nil {
 			w.writeLog("[PIN] Не удалось перезакрепить: %v", err)
@@ -284,6 +288,7 @@ func (w *Watchdog) superviseP(rt xkeen.Runtime, top xkeen.Topology) {
 	}
 	if restored {
 		w.writeLog("[PIN] Закрепление восстановлено после перезапуска ядра: %s", state.PinnedTag)
+		w.publishPool()
 	}
 }
 
@@ -293,7 +298,12 @@ func (w *Watchdog) rotateExit(rt xkeen.Runtime, top xkeen.Topology) {
 		return
 	}
 
-	if current := w.poolStore.Get().PinnedTag; current != "" {
+	state := w.poolStore.Get()
+	if state.PinManual {
+		w.dropManual(fmt.Sprintf("через выбранную вручную ноду %s перестали работать сервисы", state.PinnedTag))
+	}
+
+	if current := state.PinnedTag; current != "" {
 		ttl := time.Duration(w.config.BlacklistTTLSec) * time.Second
 		if ttl <= 0 {
 			ttl = 30 * time.Minute
@@ -327,21 +337,58 @@ func (w *Watchdog) pinBest(rt xkeen.Runtime, top xkeen.Topology) (string, error)
 	}
 
 	if w.poolStore != nil {
-		node := xkeen.NodeKeyForTag(w.config.OutboundsFile, w.selector(top), tag)
-		if err := w.poolStore.SetPinned(tag, node); err != nil {
+		node := xkeen.NodeKeyForTag(w.config.OutboundsFile, top.Selector(), tag)
+		if err := w.poolStore.SetPinned(tag, node, false); err != nil {
 			w.writeLog("[PIN] Не удалось сохранить закрепление: %v", err)
 		}
 	}
+	w.publishPool()
 
 	return tag, nil
 }
 
-// selector is the tag prefix the pool's balancer selects on.
-func (w *Watchdog) selector(top xkeen.Topology) string {
-	if len(top.Selectors) > 0 {
-		return top.Selectors[0]
+func (w *Watchdog) PinBest() (string, error) {
+	top := w.detector.Topology()
+	if top.Mode != xkeen.TopologyPool {
+		return "", fmt.Errorf("пул не включён")
 	}
-	return xkeen.DefaultPoolSelector
+	return w.pinBest(w.detector.Runtime(), top)
+}
+
+func (w *Watchdog) dropManual(reason string) {
+	w.writeLog("[PIN] Ручной выбор снят: %s — ноду снова выбирает панель", reason)
+	if err := w.poolStore.DropManual(reason); err != nil {
+		w.writeLog("[PIN] Не удалось сохранить режим: %v", err)
+	}
+}
+
+// Verdicts and condemnation earned by the previous exit must not count against a node picked by hand.
+func (w *Watchdog) NodePinned(tag string) {
+	w.mu.Lock()
+	delete(w.badNodes, tag)
+	w.mu.Unlock()
+
+	w.health.Reset()
+	w.publishPool()
+}
+
+func (w *Watchdog) ExcludedNodes() map[string]time.Time {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	excluded := make(map[string]time.Time, len(w.badNodes))
+	for tag, until := range w.badNodes {
+		if time.Now().Before(until) {
+			excluded[tag] = until
+		}
+	}
+	return excluded
+}
+
+func (w *Watchdog) publishPool() {
+	if w.eventBus != nil {
+		w.eventBus.Publish(sse.Event{Type: "pool", Data: struct{}{}})
+	}
 }
 
 // excludedNodes lists pool tags still serving their condemnation.
@@ -432,13 +479,8 @@ func (w *Watchdog) handlePoolFailover(reason string, top xkeen.Topology) {
 		w.writeLog("[WARN] Не удалось обновить подписку: %v", err)
 	}
 
-	selector := xkeen.DefaultPoolSelector
-	if len(top.Selectors) > 0 {
-		selector = top.Selectors[0]
-	}
-
 	servers := w.subscription.GetServers()
-	state := xkeen.PoolState{BalancerTag: top.BalancerTag, Selector: selector}
+	state := xkeen.PoolState{BalancerTag: top.BalancerTag, Selector: top.Selector()}
 
 	result, err := xkeen.RefreshPool(w.detector.Runtime(), w.config.OutboundsFile, w.config.XrayAPIAddr, servers, state,
 		xkeen.PoolSelectionFromConfig(w.config, w.geoip))
@@ -691,6 +733,7 @@ func (w *Watchdog) GetStatus() models.Status {
 		Latency:        w.lastLatency,
 		LastCheck:      w.lastCheck,
 		WatchdogActive: w.active,
+		PanelVersion:   version.Version,
 		Core:           rt.Core,
 		Mode:           rt.Mode,
 		XKeenVersion:   rt.Version,
@@ -709,13 +752,26 @@ func (w *Watchdog) GetStatus() models.Status {
 		}
 	}
 
-	// Current server
-	if server := w.subscription.GetActiveServer(); server != nil {
+	// In pool mode traffic goes through the pinned node, not the subscription's active entry
+	if server := w.currentServer(); server != nil {
 		status.CurrentServer = server.Name
 		status.Protocol = server.Protocol
 	}
 
 	return status
+}
+
+func (w *Watchdog) currentServer() *models.Server {
+	if w.poolStore != nil && w.detector.Topology().Mode == xkeen.TopologyPool {
+		state := w.poolStore.Get()
+		if server, ok := xkeen.ServerForNode(w.subscription.GetServers(), state.PinnedNode); ok {
+			return &server
+		}
+		if state.PinnedTag != "" {
+			return &models.Server{Name: state.PinnedTag, Protocol: "vless"}
+		}
+	}
+	return w.subscription.GetActiveServer()
 }
 
 // GetLogs returns the last n log lines.

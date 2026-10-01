@@ -25,6 +25,11 @@ type PoolState struct {
 	// slots, not identities: a refresh can leave the tag in place and put a
 	// different server behind it, and then the pin silently means something else.
 	PinnedNode string `json:"pinned_node,omitempty"`
+
+	// A manual pin survives high ping; the watchdog drops it only when services stop working through it
+	PinManual bool `json:"pin_manual,omitempty"`
+
+	PinNote string `json:"pin_note,omitempty"`
 }
 
 // PoolStore persists PoolState next to the panel's other data.
@@ -84,9 +89,20 @@ func (s *PoolStore) Set(state PoolState) error {
 // SetPinned records the pinned node so it can be re-applied after a restart —
 // a balancer override lives only in Xray's memory — and so that the tag moving
 // to a different server is detectable.
-func (s *PoolStore) SetPinned(tag, node string) error {
+func (s *PoolStore) SetPinned(tag, node string, manual bool) error {
 	state := s.Get()
 	state.PinnedTag = tag
 	state.PinnedNode = node
+	state.PinManual = manual
+	if manual {
+		state.PinNote = ""
+	}
+	return s.Set(state)
+}
+
+func (s *PoolStore) DropManual(note string) error {
+	state := s.Get()
+	state.PinManual = false
+	state.PinNote = note
 	return s.Set(state)
 }

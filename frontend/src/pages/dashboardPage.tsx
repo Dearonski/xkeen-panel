@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/hooks/useAuth'
 import { useEventSource } from '@/hooks/useEventSource'
@@ -6,13 +7,15 @@ import { api } from '@/lib/api'
 import { StatusBadge } from '@/components/statusBadge'
 import { SubscriptionForm } from '@/components/subscriptionForm'
 import { ServerList } from '@/components/serverList'
+import { PoolNodes } from '@/components/poolNodes'
 import { Controls } from '@/components/controls'
 import { XKeenCard } from '@/components/xkeenCard'
 import { SettingsCard } from '@/components/settingsCard'
 import { PasskeyCard } from '@/components/passkeyCard'
+import { UpdateCard } from '@/components/updateCard'
 import { LogViewer } from '@/components/logViewer'
 import { Button } from '@/components/ui/button'
-import { IconLogout, IconLoader2 } from '@tabler/icons-react'
+import { IconLogout, IconLoader2, IconRefresh } from '@tabler/icons-react'
 import type {
     Status,
     SubscriptionInfo,
@@ -37,6 +40,19 @@ export function DashboardPage() {
     })
 
     const restarting = status.data?.restarting ?? false
+
+    // The page keeps running the old bundle after the panel updates itself
+    const loadedVersion = useRef<string | undefined>(undefined)
+    const panelVersion = status.data?.panel_version
+    if (panelVersion && !loadedVersion.current) {
+        loadedVersion.current = panelVersion
+    }
+    const panelUpdated =
+        !!panelVersion && panelVersion !== loadedVersion.current
+
+    useEffect(() => {
+        if (panelVersion) qc.invalidateQueries({ queryKey: ['update'] })
+    }, [panelVersion, qc])
 
     const subscription = useQuery({
         queryKey: ['subscription'],
@@ -82,17 +98,41 @@ export function DashboardPage() {
         },
     })
 
+    const isPool = pool.data?.mode === 'pool'
+
     const selectServer = useMutation({
         mutationFn: (id: number) => api.post('/api/servers/select', { id }),
         onMutate: id => {
             qc.setQueryData<Server[]>(['servers'], old =>
                 old?.map(s => ({ ...s, active: s.id === id })),
             )
-            qc.setQueryData<Status>(['status'], old =>
-                old ? { ...old, restarting: true } : old,
-            )
+            // Pinning a pool node goes through the core API, without a restart
+            if (!isPool) {
+                qc.setQueryData<Status>(['status'], old =>
+                    old ? { ...old, restarting: true } : old,
+                )
+            }
         },
         onSettled: () => {
+            qc.invalidateQueries({ queryKey: ['servers'] })
+            qc.invalidateQueries({ queryKey: ['status'] })
+            qc.invalidateQueries({ queryKey: ['pool'] })
+        },
+    })
+
+    const poolPin = useMutation({
+        mutationFn: (tag: string) => api.post('/api/pool/pin', { tag }),
+        onSettled: () => {
+            qc.invalidateQueries({ queryKey: ['pool'] })
+            qc.invalidateQueries({ queryKey: ['servers'] })
+            qc.invalidateQueries({ queryKey: ['status'] })
+        },
+    })
+
+    const poolAuto = useMutation({
+        mutationFn: () => api.post('/api/pool/auto'),
+        onSettled: () => {
+            qc.invalidateQueries({ queryKey: ['pool'] })
             qc.invalidateQueries({ queryKey: ['servers'] })
             qc.invalidateQueries({ queryKey: ['status'] })
         },
@@ -169,6 +209,19 @@ export function DashboardPage() {
                     XKeen перезапускается...
                 </div>
             )}
+            {panelUpdated && (
+                <div className='bg-emerald-500/10 border-b border-emerald-500/30 px-4 py-2.5 flex items-center justify-center gap-3 text-sm text-emerald-400'>
+                    Панель перезапущена в версии {panelVersion}
+                    <Button
+                        size='sm'
+                        variant='outline'
+                        onClick={() => window.location.reload()}
+                    >
+                        <IconRefresh className='size-4' />
+                        Перезагрузить
+                    </Button>
+                </div>
+            )}
             {/* Шапка */}
             <header className='bg-card border-b sticky top-0 z-10'>
                 <div className='max-w-6xl mx-auto px-4 py-3 flex items-center justify-between'>
@@ -242,6 +295,7 @@ export function DashboardPage() {
                                 restarting
                             }
                         />
+                        <UpdateCard />
                         <SettingsCard />
                         <PasskeyCard />
                         <LogViewer
@@ -252,7 +306,23 @@ export function DashboardPage() {
                             loading={logs.isFetching}
                         />
                     </div>
-                    <div>
+                    <div className='space-y-4'>
+                        {isPool && pool.data && (
+                            <PoolNodes
+                                pool={pool.data}
+                                servers={servers.data ?? []}
+                                onPin={tag => poolPin.mutate(tag)}
+                                onAuto={() => poolAuto.mutate()}
+                                error={
+                                    (poolPin.error ?? poolAuto.error)?.message
+                                }
+                                loading={
+                                    poolPin.isPending ||
+                                    poolAuto.isPending ||
+                                    restarting
+                                }
+                            />
+                        )}
                         <ServerList
                             servers={servers.data ?? []}
                             onSelect={id => selectServer.mutate(id)}
@@ -260,6 +330,7 @@ export function DashboardPage() {
                                 setCountry.mutate({ id, country })
                             }
                             onCheckAll={checkLatency}
+                            poolMode={isPool}
                             loading={
                                 selectServer.isPending ||
                                 checkingLatency ||

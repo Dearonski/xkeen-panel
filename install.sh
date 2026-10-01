@@ -1,7 +1,7 @@
 #!/bin/sh
-# Установка XKeen Panel на Keenetic роутер
-# Запуск: sh install.sh [архитектура]
-# Архитектуры: aarch64 (по умолчанию), mips, mipsel
+# Installs XKeen Panel on a Keenetic router
+# Usage: sh install.sh [architecture]
+# Architectures: aarch64 (default), mips, mipsel
 
 set -e
 
@@ -10,7 +10,7 @@ INSTALL_DIR="/opt/etc/xkeen-panel"
 BIN_PATH="/opt/sbin/xkeen-panel"
 INIT_SCRIPT="/opt/etc/init.d/S99xkeen-panel"
 
-# Определить архитектуру
+# Detect the architecture
 ARCH="${1:-$(uname -m)}"
 case "$ARCH" in
     aarch64|arm64) ARCH="aarch64" ;;
@@ -26,13 +26,13 @@ esac
 echo "=== XKeen Panel — установка ==="
 echo "Архитектура: $ARCH"
 
-# Проверить зависимости
+# Check dependencies
 if ! command -v curl >/dev/null 2>&1; then
     echo "Ошибка: curl не найден. Установите: opkg install curl"
     exit 1
 fi
 
-# Скачать последний релиз
+# Download the latest release
 echo "Скачивание бинарника..."
 DOWNLOAD_URL=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" \
     | grep "browser_download_url.*$ARCH" \
@@ -44,7 +44,7 @@ if [ -z "$DOWNLOAD_URL" ]; then
     exit 1
 fi
 
-# Остановить если запущен
+# Stop the running instance
 if [ -f "$INIT_SCRIPT" ]; then
     echo "Остановка текущей версии..."
     "$INIT_SCRIPT" stop 2>/dev/null || true
@@ -54,22 +54,22 @@ curl -L -o "$BIN_PATH" "$DOWNLOAD_URL"
 chmod +x "$BIN_PATH"
 echo "Бинарник: $BIN_PATH"
 
-# Создать директории
+# Create directories
 mkdir -p "$INSTALL_DIR/data"
 
-# Конфиг (не перезаписывать существующий)
+# Config (never overwrite an existing one)
 if [ ! -f "$INSTALL_DIR/config.yaml" ]; then
     cat > "$INSTALL_DIR/config.yaml" << 'YAML'
-# Порт веб-панели
+# Web panel port
 port: 3000
 
-# Папка для данных (user.json, subscription.json)
+# Data directory (user.json, subscription.json)
 data_dir: /opt/etc/xkeen-panel/data
 
-# === Пути XKeen/Xray ===
-# Раскладка XKeen (S05xkeen/S24xray), активное ядро и режим проксирования
-# определяются автоматически — задавать пути ниже нужно только при
-# нестандартной установке.
+# === XKeen/Xray paths ===
+# The XKeen layout (S05xkeen/S24xray), the active core and the proxying mode
+# are detected automatically — set the paths below only for a non-standard
+# install.
 xkeen_path: /opt/sbin/xkeen
 outbounds_file: /opt/etc/xray/configs/04_outbounds.json
 
@@ -78,13 +78,17 @@ check_interval: 120
 check_url: https://www.google.com
 max_fails: 3
 
-# Лог-файл
+# Log file
 log_file: /opt/var/log/xkeen-panel.log
 
-# Размер пула балансировщика (лучшие по пингу, без стран из списка ниже)
+# Hour (router time) at which the panel installs its own updates.
+# Automatic updates themselves are switched on and off in the panel.
+auto_update_hour: 4
+
+# Balancer pool size (lowest latency, without avoided countries)
 pool_max_nodes: 10
 
-# Проверка реальных сервисов через активную ноду (ловит IP, забаненные у CDN)
+# Probe real services through the active node (catches IPs banned by CDNs)
 health_check_every: 5
 health_fail_threshold: 2
 health_quorum: 2
@@ -94,10 +98,10 @@ else
     echo "Конфиг уже существует, пропущен"
 fi
 
-# Создать директорию для логов
+# Create the log directory
 mkdir -p /opt/var/log
 
-# Init-скрипт
+# Init script
 cat > "$INIT_SCRIPT" << 'INITSCRIPT'
 #!/bin/sh
 
@@ -112,7 +116,7 @@ INITSCRIPT
 chmod +x "$INIT_SCRIPT"
 echo "Init-скрипт: $INIT_SCRIPT"
 
-# Запуск
+# Start
 echo ""
 echo "=== Установка завершена ==="
 echo ""

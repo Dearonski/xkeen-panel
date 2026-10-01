@@ -25,13 +25,22 @@ jobs:
       - name: Build frontend
         run: cd frontend && npm ci && npm run build
 
+      - name: Test
+        run: go test ./...
+
       - name: Build binaries
+        env:
+          LDFLAGS: -s -w -X xkeen-panel/internal/version.Version=${{ github.ref_name }}
         run: |
           # aarch64 (Keenetic Giga, Ultra, Peak, Hopper и др.)
-          GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o build/xkeen-panel-aarch64 .
+          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="$LDFLAGS" -o build/xkeen-panel-aarch64 .
 
           # mipsel (Keenetic старых серий)
-          GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -ldflags="-s -w" -o build/xkeen-panel-mipsel .
+          GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -trimpath -ldflags="$LDFLAGS" -o build/xkeen-panel-mipsel .
+
+      # The panel refuses to update itself from a release without this file
+      - name: Checksums
+        run: cd build && sha256sum xkeen-panel-aarch64 xkeen-panel-mipsel > SHA256SUMS
 
       - name: Create release
         uses: softprops/action-gh-release@v2
@@ -40,3 +49,4 @@ jobs:
           files: |
             build/xkeen-panel-aarch64
             build/xkeen-panel-mipsel
+            build/SHA256SUMS

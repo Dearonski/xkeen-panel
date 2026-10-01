@@ -38,6 +38,9 @@ type Config struct {
 	// Automatic subscription refresh
 	SubscriptionRefreshInterval int `yaml:"subscription_refresh_interval"`
 
+	// Local hour at which the panel installs its own updates when that is on
+	AutoUpdateHour int `yaml:"auto_update_hour"`
+
 	// Cap on pool size: every node is probed by observatory separately
 	PoolMaxNodes int `yaml:"pool_max_nodes"`
 
@@ -110,6 +113,7 @@ type Status struct {
 	Uptime         string    `json:"uptime"`
 	LastCheck      time.Time `json:"last_check"`
 	WatchdogActive bool      `json:"watchdog_active"`
+	PanelVersion   string    `json:"panel_version"`
 
 	// XKeen runtime: proxy core (xray/mihomo), proxying mode (TProxy/Hybrid/…),
 	// version and layout generation.

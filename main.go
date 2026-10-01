@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 	"xkeen-panel/internal/auth"
@@ -17,14 +19,36 @@ import (
 	"xkeen-panel/internal/monitor"
 	"xkeen-panel/internal/server"
 	"xkeen-panel/internal/sse"
+	"xkeen-panel/internal/updater"
+	"xkeen-panel/internal/version"
 	"xkeen-panel/internal/xkeen"
 
 	"gopkg.in/yaml.v3"
 )
 
+// Written by install.sh; the update guard restarts the panel through it.
+const panelInitScript = "/opt/etc/init.d/S99xkeen-panel"
+
 func main() {
 	configPath := flag.String("config", "config.yaml", "путь к конфигурационному файлу")
+	showVersion := flag.Bool("version", false, "вывести версию и выйти")
 	flag.Parse()
+
+	// The updater runs the new binary with -version before switching to it
+	if *showVersion {
+		fmt.Println(version.Version)
+		return
+	}
+
+	// Resolved now: once an update renames the running file, the link points at .prev
+	binPath, err := os.Executable()
+	if err == nil {
+		binPath, err = filepath.EvalSymlinks(binPath)
+	}
+	if err != nil {
+		log.Printf("Путь к бинарю не определён (%v) — самообновление недоступно", err)
+		binPath = ""
+	}
 
 	// Load the configuration
 	cfg, err := loadConfig(*configPath)
@@ -115,12 +139,40 @@ func main() {
 	defer cancel()
 
 	// Run the watchdog
-	go watchdog.Start(ctx)
+	watchdogDone := make(chan struct{})
+	go func() {
+		watchdog.Start(ctx)
+		close(watchdogDone)
+	}()
 
 	// Periodic subscription refresh
 	if cfg.SubscriptionRefreshInterval > 0 {
 		go runSubscriptionRefresh(ctx, cfg, subManager, watchdog, detector, poolStore, geoMatcher, eventBus)
 	}
+
+	// The process is replaced only after the HTTP server and the watchdog have stopped
+	reexec := make(chan struct{}, 1)
+	upd := updater.New(updater.Options{
+		Current:    version.Version,
+		BinPath:    binPath,
+		DataDir:    cfg.DataDir,
+		InitScript: panelInitScript,
+		AutoHour:   cfg.AutoUpdateHour,
+		Log:        watchdog.Log,
+		Publish: func(state updater.State) {
+			eventBus.Publish(sse.Event{Type: "update", Data: state})
+		},
+		Restart: func() error {
+			select {
+			case reexec <- struct{}{}:
+			default:
+			}
+			return nil
+		},
+		Busy: xkeen.IsRestarting,
+	})
+	upd.Startup(ctx, func() bool { return panelResponds(cfg.Port) })
+	go upd.Run(ctx)
 
 	// Frontend assets
 	var frontendFS fs.FS
@@ -132,19 +184,28 @@ func main() {
 	}
 
 	// HTTP server
-	srv := server.New(cfg, userManager, subManager, watchdog, detector, poolStore, geoMatcher, eventBus, frontendFS)
+	srv := server.New(cfg, userManager, subManager, watchdog, detector, poolStore, geoMatcher, eventBus, upd, frontendFS)
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Port),
 		Handler: srv.Handler(),
+		// SSE streams never go idle, so Shutdown would wait out its timeout unless cancelling ctx ends them
+		BaseContext: func(net.Listener) context.Context { return ctx },
 	}
 
 	// Graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
+	stopped := make(chan bool, 1)
 	go func() {
-		<-sigChan
-		log.Println("Получен сигнал завершения, останавливаем сервер...")
+		restart := false
+		select {
+		case <-sigChan:
+			log.Println("Получен сигнал завершения, останавливаем сервер...")
+		case <-reexec:
+			restart = true
+			log.Println("Перезапуск в новую версию, останавливаем сервер...")
+		}
 		cancel()
 
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -153,14 +214,39 @@ func main() {
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
 			log.Printf("Ошибка при остановке сервера: %v", err)
 		}
+
+		// A watchdog cut off mid-check could leave a core config half-applied
+		select {
+		case <-watchdogDone:
+		case <-time.After(60 * time.Second):
+			log.Println("Watchdog не остановился за минуту — продолжаю")
+		}
+
+		stopped <- restart
 	}()
 
-	log.Printf("XKeen Panel v2 запущена на порту %d (xkeen=%s, outbounds=%s)", cfg.Port, cfg.XKeenPath, cfg.OutboundsFile)
+	log.Printf("XKeen Panel %s запущена на порту %d (xkeen=%s, outbounds=%s)", version.Version, cfg.Port, cfg.XKeenPath, cfg.OutboundsFile)
 	if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatalf("Ошибка сервера: %v", err)
 	}
 
+	if <-stopped {
+		// Same PID and name, so the init script keeps recognising the process
+		err := syscall.Exec(binPath, os.Args, os.Environ())
+		log.Fatalf("Не удалось запустить новую версию: %v", err)
+	}
+
 	log.Println("Сервер остановлен")
+}
+
+func panelResponds(port int) bool {
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/auth/status", port))
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 // runSubscriptionRefresh refreshes the subscription on a timer. The core is
@@ -281,6 +367,7 @@ func loadConfig(path string) (*models.Config, error) {
 		WatchdogAutoStart:  true,
 
 		SubscriptionRefreshInterval: 1800,
+		AutoUpdateHour:              4,
 
 		PoolMaxNodes:             xkeen.DefaultPoolMaxNodes,
 		HealthCheckURLs:          monitor.DefaultHealthURLs,

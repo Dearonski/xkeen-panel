@@ -72,10 +72,14 @@ export function XKeenCard({
                             <dt className='text-muted-foreground'>
                                 Активная нода
                             </dt>
-                            <dd>
-                                {pool.current_tag}
+                            <dd className='truncate max-w-[60%] text-right'>
+                                {pool.nodes?.find(
+                                    n => n.tag === pool.current_tag,
+                                )?.name ?? pool.current_tag}
                                 {pool.pinned_tag === pool.current_tag
-                                    ? ' (закреплена)'
+                                    ? pool.pin_manual
+                                        ? ' (вручную)'
+                                        : ' (авто)'
                                     : ''}
                             </dd>
                         </div>

@@ -29,7 +29,8 @@ export function useEventSource() {
             })
 
             es.addEventListener('log', e => {
-                const line: string = JSON.parse(e.data)
+                // Log lines are sent as plain text, not JSON
+                const line: string = e.data
                 qc.setQueryData<string[]>(['logs'], old => {
                     const logs = old ?? []
                     const updated = [...logs, line]
@@ -49,6 +50,16 @@ export function useEventSource() {
             es.addEventListener('subscription', () => {
                 qc.invalidateQueries({ queryKey: ['subscription'] })
                 qc.invalidateQueries({ queryKey: ['servers'] })
+            })
+
+            es.addEventListener('update', e => {
+                qc.setQueryData(['update'], JSON.parse(e.data))
+            })
+
+            es.addEventListener('pool', () => {
+                qc.invalidateQueries({ queryKey: ['pool'] })
+                qc.invalidateQueries({ queryKey: ['servers'] })
+                qc.invalidateQueries({ queryKey: ['status'] })
             })
 
             es.onerror = () => {

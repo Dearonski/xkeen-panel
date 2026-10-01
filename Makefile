@@ -13,27 +13,31 @@ dev-frontend:
 
 # === Продакшен билд ===
 
+# The tag is the only source of the version; the updater compares against it
+VERSION ?= $(shell git describe --tags --dirty 2>/dev/null || echo dev)
+LDFLAGS := -s -w -X xkeen-panel/internal/version.Version=$(VERSION)
+
 build-frontend:
 	cd frontend && npm ci && npm run build
 
 build-arm64: build-frontend
 	GOOS=linux GOARCH=arm64 go build \
-		-trimpath -ldflags="-s -w" \
+		-trimpath -ldflags="$(LDFLAGS)" \
 		-o build/xkeen-panel-aarch64 \
 		.
 
 build-mipsel: build-frontend
 	GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build \
-		-trimpath -ldflags="-s -w" \
+		-trimpath -ldflags="$(LDFLAGS)" \
 		-o build/xkeen-panel-mipsel \
 		.
 
 build-all: build-frontend
-	GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o build/xkeen-panel-aarch64 .
-	GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -trimpath -ldflags="-s -w" -o build/xkeen-panel-mipsel .
+	GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="$(LDFLAGS)" -o build/xkeen-panel-aarch64 .
+	GOOS=linux GOARCH=mipsle GOMIPS=softfloat go build -trimpath -ldflags="$(LDFLAGS)" -o build/xkeen-panel-mipsel .
 
 build-local: build-frontend
-	go build -o build/xkeen-panel .
+	go build -ldflags="$(LDFLAGS)" -o build/xkeen-panel .
 
 # === Деплой ===
 

@@ -3,7 +3,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { cn } from '@/lib/utils'
+import { cn, flagFor, latencyClass } from '@/lib/utils'
 import type { Server } from '@/types'
 
 const protocolVariant: Record<string, string> = {
@@ -19,25 +19,17 @@ const maskAddress = (addr: string) => {
     return addr.length > 12 ? addr.substring(0, 8) + '...' : addr
 }
 
-const codeToFlag = (cc?: string) => {
-    if (!cc || cc.length !== 2) return ''
-    const base = 0x1f1e6
-    const up = cc.toUpperCase()
-    return String.fromCodePoint(
-        base + up.charCodeAt(0) - 65,
-        base + up.charCodeAt(1) - 65,
-    )
-}
-
 export function ServerCard({
     server,
     onSelect,
     onSetCountry,
+    poolMode,
     loading,
 }: {
     server: Server
     onSelect: (id: number) => void
     onSetCountry?: (id: number, country: string) => void
+    poolMode?: boolean
     loading: boolean
 }) {
     const [editing, setEditing] = useState(false)
@@ -46,11 +38,8 @@ export function ServerCard({
     )
 
     const country = server.country_override || server.country
-    // Subscription names often already start with a flag emoji — do not add a second one.
-    const nameHasFlag = /\p{Regional_Indicator}\p{Regional_Indicator}/u.test(
-        server.name,
-    )
-    const flag = nameHasFlag ? '' : codeToFlag(country)
+    const flag = flagFor(server.name, country)
+    const outsidePool = poolMode && !server.pool_tag
 
     const saveCountry = () => {
         onSetCountry?.(server.id, value.trim().toUpperCase())
@@ -63,6 +52,7 @@ export function ServerCard({
                 'transition-colors',
                 server.active &&
                     'border-emerald-500/50 shadow-[0_0_12px_rgba(16,185,129,0.08)]',
+                outsidePool && 'opacity-60',
             )}
         >
             <CardContent className='flex items-start justify-between gap-3 py-3'>
@@ -89,6 +79,14 @@ export function ServerCard({
                                 ? 'SS'
                                 : server.protocol}
                         </Badge>
+                        {poolMode && server.pool_tag && (
+                            <Badge
+                                variant='outline'
+                                className='text-[10px] bg-sky-500/15 text-sky-400 border-sky-500/25'
+                            >
+                                в пуле
+                            </Badge>
+                        )}
                         <span className='text-muted-foreground'>
                             {maskAddress(server.address)}:{server.port}
                         </span>
@@ -96,11 +94,7 @@ export function ServerCard({
                             <span
                                 className={cn(
                                     'font-mono',
-                                    server.latency_ms < 200
-                                        ? 'text-emerald-400'
-                                        : server.latency_ms < 500
-                                          ? 'text-amber-400'
-                                          : 'text-red-400',
+                                    latencyClass(server.latency_ms),
                                 )}
                             >
                                 {server.latency_ms}ms
@@ -159,14 +153,22 @@ export function ServerCard({
                     </div>
                 </div>
 
-                {!server.active && (
+                {outsidePool && (
+                    <span
+                        className='shrink-0 text-xs text-muted-foreground'
+                        title='Пул собирается из лучших серверов подписки — закрепить можно только ноду из него'
+                    >
+                        не в пуле
+                    </span>
+                )}
+                {!server.active && !outsidePool && (
                     <Button
                         size='sm'
                         variant='outline'
                         onClick={() => onSelect(server.id)}
                         disabled={loading}
                     >
-                        Выбрать
+                        {poolMode ? 'Закрепить' : 'Выбрать'}
                     </Button>
                 )}
             </CardContent>

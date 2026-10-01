@@ -13,6 +13,7 @@ import (
 	"xkeen-panel/internal/models"
 	"xkeen-panel/internal/monitor"
 	"xkeen-panel/internal/sse"
+	"xkeen-panel/internal/updater"
 	"xkeen-panel/internal/xkeen"
 
 	"github.com/go-chi/chi/v5"
@@ -28,10 +29,11 @@ type Server struct {
 	pool         *xkeen.PoolStore
 	geoip        *geoip.Matcher
 	eventBus     *sse.EventBus
+	updater      *updater.Updater
 	frontendFS   fs.FS
 }
 
-func New(cfg *models.Config, um *auth.UserManager, sub *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, pool *xkeen.PoolStore, matcher *geoip.Matcher, bus *sse.EventBus, frontendFS fs.FS) *Server {
+func New(cfg *models.Config, um *auth.UserManager, sub *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, pool *xkeen.PoolStore, matcher *geoip.Matcher, bus *sse.EventBus, upd *updater.Updater, frontendFS fs.FS) *Server {
 	return &Server{
 		config:       cfg,
 		userManager:  um,
@@ -41,6 +43,7 @@ func New(cfg *models.Config, um *auth.UserManager, sub *xkeen.SubscriptionManage
 		pool:         pool,
 		geoip:        matcher,
 		eventBus:     bus,
+		updater:      upd,
 		frontendFS:   frontendFS,
 	}
 }
@@ -58,6 +61,7 @@ func (s *Server) Handler() http.Handler {
 	// Handlers
 	authHandler := api.NewAuthHandler(s.userManager, rateLimiter, s.config)
 	webAuthnHandler := api.NewWebAuthnHandler(s.userManager, rateLimiter, s.config)
+	updateHandler := api.NewUpdateHandler(s.updater)
 	handlers := api.NewHandlers(s.config, s.subscription, s.watchdog, s.detector, s.pool, s.geoip)
 
 	// API routes
@@ -118,6 +122,14 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/pool/enable", handlers.HandlePoolEnable)
 			r.Post("/pool/disable", handlers.HandlePoolDisable)
 			r.Post("/pool/sync", handlers.HandlePoolSync)
+			r.Post("/pool/pin", handlers.HandlePoolPin)
+			r.Post("/pool/auto", handlers.HandlePoolAuto)
+
+			r.Get("/update", updateHandler.HandleStatus)
+			r.Post("/update/check", updateHandler.HandleCheck)
+			r.Post("/update/apply", updateHandler.HandleApply)
+			r.Post("/update/rollback", updateHandler.HandleRollback)
+			r.Put("/update/settings", updateHandler.HandleSettings)
 
 			r.Get("/logs", handlers.HandleLogs)
 

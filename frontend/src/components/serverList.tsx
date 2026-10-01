@@ -11,12 +11,14 @@ export function ServerList({
     onSelect,
     onSetCountry,
     onCheckAll,
+    poolMode,
     loading,
 }: {
     servers: Server[]
     onSelect: (id: number) => void
     onSetCountry?: (id: number, country: string) => void
     onCheckAll: () => void
+    poolMode?: boolean
     loading: boolean
 }) {
     const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
@@ -25,6 +27,8 @@ export function ServerList({
     const sorted = [...servers].sort((a, b) => {
         if (a.active) return -1
         if (b.active) return 1
+        if (poolMode && !!a.pool_tag !== !!b.pool_tag)
+            return a.pool_tag ? -1 : 1
         if (a.latency_ms === -1 && b.latency_ms === -1) return 0
         if (a.latency_ms === -1) return 1
         if (b.latency_ms === -1) return -1
@@ -78,6 +82,7 @@ export function ServerList({
                         server={server}
                         onSelect={onSelect}
                         onSetCountry={onSetCountry}
+                        poolMode={poolMode}
                         loading={loading}
                     />
                 ))}

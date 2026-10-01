@@ -129,10 +129,36 @@ func (h *Handlers) refreshPool(servers []models.Server) (xkeen.SyncResult, error
 }
 
 // HandleGetServers — GET /api/servers
+type serverView struct {
+	models.Server
+	PoolTag string `json:"pool_tag,omitempty"`
+}
+
 func (h *Handlers) HandleGetServers(w http.ResponseWriter, r *http.Request) {
 	servers := h.subscription.GetServers()
+	views := make([]serverView, len(servers))
+	for i, server := range servers {
+		views[i] = serverView{Server: server}
+	}
+
+	// In pool mode the active entry is the pinned node, not the server the pool was built from
+	if top := h.detector.Topology(); top.Mode == xkeen.TopologyPool {
+		state := h.pool.Get()
+		pinned, hasPinned := xkeen.ServerForNode(servers, state.PinnedNode)
+
+		var tags map[int]string
+		if nodes, err := xkeen.PoolNodes(h.config.OutboundsFile, top.Selector(), servers); err == nil {
+			tags = xkeen.PoolTagsByServer(nodes)
+		}
+
+		for i := range views {
+			views[i].PoolTag = tags[views[i].ID]
+			views[i].Active = hasPinned && views[i].RawURI == pinned.RawURI
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"servers": servers,
+		"servers": views,
 	})
 }
 
@@ -188,7 +214,7 @@ func (h *Handlers) HandleSelectServer(w http.ResponseWriter, r *http.Request) {
 	// In pool mode the balancer picks the node, so a manual choice is an override
 	// through the core API: instant, no restart
 	if top := h.detector.Topology(); top.Mode == xkeen.TopologyPool {
-		if err := h.pinPoolNode(rt, top, server); err != nil {
+		if err := h.pinServer(rt, top, server); err != nil {
 			log.Printf("[SELECT] Ошибка закрепления ноды: %v", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -227,32 +253,26 @@ func (h *Handlers) HandleSelectServer(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// pinPoolNode pins the pool node that carries the chosen server.
-//
-// The node is matched by endpoint, not by position: the pool holds only the best
-// `pool_max_nodes` of the subscription, so a subscription index says nothing
-// about which node — if any — serves that server.
-func (h *Handlers) pinPoolNode(rt xkeen.Runtime, top xkeen.Topology, server *models.Server) error {
-	selector := xkeen.DefaultPoolSelector
-	if len(top.Selectors) > 0 {
-		selector = top.Selectors[0]
-	}
-
-	nodes, err := xkeen.PoolNodes(h.config.OutboundsFile, selector, []models.Server{*server})
+// Matched by endpoint: the pool holds only the best nodes, so a subscription index says nothing about them.
+func (h *Handlers) pinServer(rt xkeen.Runtime, top xkeen.Topology, server *models.Server) error {
+	nodes, err := xkeen.PoolNodes(h.config.OutboundsFile, top.Selector(), []models.Server{*server})
 	if err != nil {
 		return err
 	}
 
-	tag := ""
 	for _, node := range nodes {
 		if node.Server != nil {
-			tag = node.Tag
-			break
+			return h.pinTag(rt, top, node.Tag)
 		}
 	}
-	if tag == "" {
-		return fmt.Errorf("сервер %q не входит в пул (в нём %d лучших нод) — выберите один из них или пересоберите пул",
-			server.Name, len(nodes))
+
+	return fmt.Errorf("сервер %q не входит в пул (в нём %d лучших нод) — выберите один из них", server.Name, len(nodes))
+}
+
+func (h *Handlers) pinTag(rt xkeen.Runtime, top xkeen.Topology, tag string) error {
+	node := xkeen.NodeKeyForTag(h.config.OutboundsFile, top.Selector(), tag)
+	if node == "" {
+		return fmt.Errorf("ноды %q нет в пуле", tag)
 	}
 
 	if err := xkeen.OverrideBalancerTarget(rt, h.config.XrayAPIAddr, top.BalancerTag, tag); err != nil {
@@ -261,10 +281,11 @@ func (h *Handlers) pinPoolNode(rt xkeen.Runtime, top xkeen.Topology, server *mod
 
 	// The override lives only in the core's memory — store it to reapply after a
 	// restart, together with the node it means so a moved tag is detectable
-	node := xkeen.NodeKeyForTag(h.config.OutboundsFile, selector, tag)
-	if err := h.pool.SetPinned(tag, node); err != nil {
+	if err := h.pool.SetPinned(tag, node, true); err != nil {
 		log.Printf("[SELECT] Не удалось сохранить закреплённую ноду: %v", err)
 	}
+	h.watchdog.NodePinned(tag)
+	h.watchdog.Log("[PIN] Нода %s закреплена вручную", tag)
 
 	return nil
 }
@@ -441,11 +462,19 @@ func (h *Handlers) HandlePoolStatus(w http.ResponseWriter, r *http.Request) {
 		"pool_tags":    top.PoolTags,
 		"proxy_tags":   top.ProxyTags,
 		"pinned_tag":   state.PinnedTag,
+		"pin_manual":   state.PinManual,
+		"pin_note":     state.PinNote,
 		"core":         rt.Core,
 	}
 
 	// The current node is only knowable through the core API, which may be absent
 	if top.Mode == xkeen.TopologyPool {
+		if nodes, err := xkeen.PoolNodes(h.config.OutboundsFile, top.Selector(), h.subscription.GetServers()); err == nil {
+			resp["nodes"] = xkeen.DescribePool(nodes, h.watchdog.ExcludedNodes())
+		} else {
+			log.Printf("[POOL] Не удалось прочитать ноды пула: %v", err)
+		}
+
 		if target, err := xkeen.CurrentBalancerTarget(rt, h.config.XrayAPIAddr, top.BalancerTag); err == nil {
 			resp["current_tag"] = target
 			resp["api_available"] = true
@@ -524,14 +553,48 @@ func (h *Handlers) pinAfterRestart(rt xkeen.Runtime) {
 		return
 	}
 
-	selector := xkeen.DefaultPoolSelector
-	if len(top.Selectors) > 0 {
-		selector = top.Selectors[0]
-	}
-	if err := h.pool.SetPinned(tag, xkeen.NodeKeyForTag(h.config.OutboundsFile, selector, tag)); err != nil {
+	if err := h.pool.SetPinned(tag, xkeen.NodeKeyForTag(h.config.OutboundsFile, top.Selector(), tag), false); err != nil {
 		log.Printf("[PIN] Не удалось сохранить закрепление: %v", err)
 	}
 	h.watchdog.Log("[PIN] Трафик закреплён за нодой %s", tag)
+}
+
+func (h *Handlers) HandlePoolPin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Tag string `json:"tag"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Tag == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "неверный формат запроса"})
+		return
+	}
+
+	top := h.detector.Topology()
+	if top.Mode != xkeen.TopologyPool {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "пул не включён"})
+		return
+	}
+
+	if err := h.pinTag(h.detector.Runtime(), top, req.Tag); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "pinned_tag": req.Tag})
+}
+
+func (h *Handlers) HandlePoolAuto(w http.ResponseWriter, r *http.Request) {
+	if err := h.pool.DropManual(""); err != nil {
+		log.Printf("[POOL] Не удалось сохранить режим: %v", err)
+	}
+
+	tag, err := h.watchdog.PinBest()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	h.watchdog.Log("[PIN] Автовыбор ноды включён, закреплена %s", tag)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "pinned_tag": tag})
 }
 
 // HandlePoolDisable — POST /api/pool/disable. Returns the config to a single
