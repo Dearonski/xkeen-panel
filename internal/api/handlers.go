@@ -69,11 +69,7 @@ func (h *Handlers) HandleUpdateSubscription(w http.ResponseWriter, r *http.Reque
 		"server_count": len(servers),
 		"servers":      servers,
 	}
-	if sync, err := h.refreshPool(servers); err != nil {
-		resp["pool_error"] = err.Error()
-	} else if sync.Changed {
-		resp["pool"] = sync
-	}
+	h.applySubscription(servers, resp)
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -90,13 +86,70 @@ func (h *Handlers) HandleRefreshSubscription(w http.ResponseWriter, r *http.Requ
 		"server_count": len(servers),
 		"servers":      servers,
 	}
+	h.applySubscription(servers, resp)
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// applySubscription puts a fresh subscription to work: a config with no proxy
+// outbound at all (a fresh XKeen install) is built from scratch, an existing
+// pool is synced.
+func (h *Handlers) applySubscription(servers []models.Server, resp map[string]interface{}) {
+	bootstrapped, err := h.bootstrapIfEmpty(servers)
+	switch {
+	case err != nil:
+		resp["pool_error"] = err.Error()
+		return
+	case bootstrapped:
+		resp["bootstrapped"] = true
+		return
+	}
+
 	if sync, err := h.refreshPool(servers); err != nil {
 		resp["pool_error"] = err.Error()
 	} else if sync.Changed {
 		resp["pool"] = sync
 	}
+}
 
-	writeJSON(w, http.StatusOK, resp)
+func (h *Handlers) bootstrapIfEmpty(servers []models.Server) (bool, error) {
+	h.detector.InvalidateTopology()
+	rt := h.detector.Runtime()
+	if !xkeen.NeedsBootstrap(rt, h.detector.Topology()) {
+		return false, nil
+	}
+
+	state, err := xkeen.Bootstrap(rt, h.config.OutboundsFile, servers, xkeen.PoolOptions{
+		APIAddr:   h.config.XrayAPIAddr,
+		Selection: xkeen.PoolSelectionFromConfig(h.config, h.geoip),
+	})
+	if err != nil {
+		log.Printf("[BOOTSTRAP] Не удалось собрать конфиг: %v", err)
+		return false, fmt.Errorf("не удалось собрать конфиг Xray с нуля: %w", err)
+	}
+
+	if err := h.pool.Set(state); err != nil {
+		log.Printf("[BOOTSTRAP] Не удалось сохранить состояние пула: %v", err)
+	}
+	h.detector.InvalidateTopology()
+
+	if _, err := h.watchdog.EnsureProbe(); err != nil {
+		h.watchdog.Log("[BOOTSTRAP] Проверочный вход не добавлен: %v", err)
+	}
+	h.watchdog.Log("[BOOTSTRAP] Конфиг Xray собран с нуля: пул из %d нод, российский трафик напрямую", len(h.detector.Topology().PoolTags))
+
+	// A stopped core is left stopped: starting the proxy is the owner's call
+	if xkeen.IsRunning(rt.Core) {
+		go func() {
+			if _, err := xkeen.Restart(rt.Dispatcher); err != nil {
+				log.Printf("[BOOTSTRAP] Ошибка рестарта: %v", err)
+				return
+			}
+			h.pinAfterRestart(rt)
+		}()
+	}
+
+	return true, nil
 }
 
 // refreshPool brings the pool in line with the refreshed subscription. The pool
