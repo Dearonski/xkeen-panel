@@ -121,6 +121,19 @@ func (c *Config) RoutingMark() int {
 	return 0
 }
 
+// LocalProxyAddr is a socks-capable listener the panel can send checks through,
+// so they follow the same rules as client traffic. Empty when none is configured.
+func (c *Config) LocalProxyAddr() string {
+	for _, key := range []string{"mixed-port", "socks-port"} {
+		if node := mapValue(c.root(), key); node != nil {
+			if port := atoiOrZero(node.Value); port > 0 {
+				return fmt.Sprintf("127.0.0.1:%d", port)
+			}
+		}
+	}
+	return ""
+}
+
 // SyncProxies replaces the proxies section with one entry per VLESS server and
 // points every proxy-group at the new names.
 //

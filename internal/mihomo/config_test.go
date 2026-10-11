@@ -276,3 +276,20 @@ func TestWriteKeepsBackup(t *testing.T) {
 		t.Error("restore did not bring the original back")
 	}
 }
+
+func TestLocalProxyAddr(t *testing.T) {
+	cases := map[string]string{
+		"tproxy-port: 1181\n":                  "",
+		"mixed-port: 7890\nsocks-port: 7891\n": "127.0.0.1:7890",
+		"socks-port: 7891\n":                   "127.0.0.1:7891",
+	}
+	for body, want := range cases {
+		cfg, err := Read(writeConfig(t, body))
+		if err != nil {
+			t.Fatalf("Read: %v", err)
+		}
+		if got := cfg.LocalProxyAddr(); got != want {
+			t.Errorf("%q: LocalProxyAddr = %q, want %q", body, got, want)
+		}
+	}
+}

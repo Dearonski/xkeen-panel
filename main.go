@@ -90,15 +90,6 @@ func main() {
 		log.Printf("Предупреждение: не удалось загрузить состояние пула: %v", err)
 	}
 
-	// An install from before the api block was fixed cannot pin a pool node until
-	// the file is migrated, and a pool in sync never reaches the refresh path
-	if migrated, err := xkeen.EnsureAPIConfig(poolStore.Get(), cfg.XrayAPIAddr); err != nil {
-		log.Printf("Не удалось обновить api-блок Xray: %v", err)
-	} else if migrated {
-		log.Printf("api-блок Xray приведён к текущей форме — перезапускаю ядро")
-		xkeen.Restart(rt.Dispatcher)
-	}
-
 	// Watchdog and SSE
 	watchdog := monitor.NewWatchdog(cfg, subManager, detector)
 	eventBus := sse.NewEventBus()
@@ -108,6 +99,25 @@ func main() {
 	// Package xkeen logs to stdout by default, which the init script discards —
 	// send its pool and restart events to the panel log instead
 	xkeen.Log = watchdog.Log
+
+	// Both migrations need a core restart; doing them together keeps it to one
+	restartCore := false
+	if migrated, err := xkeen.EnsureAPIConfig(poolStore.Get(), cfg.XrayAPIAddr); err != nil {
+		log.Printf("Не удалось обновить api-блок Xray: %v", err)
+	} else if migrated {
+		log.Printf("api-блок Xray приведён к текущей форме")
+		restartCore = true
+	}
+	if changed, err := watchdog.EnsureProbe(); err != nil {
+		log.Printf("Не удалось добавить проверочный вход в Xray — статус будет проверяться мимо прокси: %v", err)
+	} else if changed {
+		log.Printf("В Xray добавлен проверочный вход %s", cfg.ProbeAddr)
+		restartCore = true
+	}
+	if restartCore && rt.Installed {
+		log.Printf("Конфиг Xray изменён при запуске — перезапускаю ядро")
+		xkeen.Restart(rt.Dispatcher)
+	}
 
 	// GeoIP reuses the geoip.dat already installed for Xray
 	var geoMatcher *geoip.Matcher
@@ -358,6 +368,7 @@ func loadConfig(path string) (*models.Config, error) {
 		XKeenPath:     "/opt/sbin/xkeen",
 		OutboundsFile: "/opt/etc/xray/configs/04_outbounds.json",
 		XrayAPIAddr:   "127.0.0.1:10085",
+		ProbeAddr:     "127.0.0.1:10086",
 		CheckInterval: 120,
 		CheckURL:      "https://www.google.com",
 		MaxFails:      3,

@@ -25,6 +25,7 @@ type Config struct {
 	MihomoConfig  string `yaml:"mihomo_config"`
 	XkeenJSON     string `yaml:"xkeen_json"`
 	XrayAPIAddr   string `yaml:"xray_api_addr"`
+	ProbeAddr     string `yaml:"probe_addr"` // local socks inbound the watchdog checks the proxy through
 
 	// Autopilot: latency probing and server switching
 	ProbeTimeoutMs     int  `yaml:"probe_timeout_ms"`
@@ -105,6 +106,8 @@ type SubscriptionData struct {
 // Status is the connection status reported to the UI.
 type Status struct {
 	Connected      bool      `json:"connected"`
+	Internet       bool      `json:"internet"`      // the router's own uplink works
+	ProxyChecked   bool      `json:"proxy_checked"` // connected was measured through the proxy
 	XrayRunning    bool      `json:"xray_running"`
 	Restarting     bool      `json:"restarting"`
 	CurrentServer  string    `json:"current_server"`

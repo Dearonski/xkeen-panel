@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -38,6 +38,9 @@ type Watchdog struct {
 	lastCheck    time.Time
 	lastLatency  int
 	connected    bool
+	internet     bool
+	proxyChecked bool
+	probeAddr    string
 	startTime    time.Time
 	logs         []string
 	logFile      *os.File
@@ -136,36 +139,51 @@ func (w *Watchdog) Start(ctx context.Context) {
 }
 
 func (w *Watchdog) check() {
-	start := time.Now()
-
-	// A plain HTTP request: tproxy routes it transparently
-	client := &http.Client{
-		Timeout: 10 * time.Second,
+	// Mid-restart the core refuses connections, which says nothing about the node
+	if xkeen.IsRestarting() {
+		return
 	}
 
-	resp, err := client.Get(w.config.CheckURL)
+	proxy := w.proxyURL()
+	latency, err := fetchLatency(w.config.CheckURL, proxy, 10*time.Second)
+
+	// Only a direct request can tell a dead node from a dead uplink, and on a
+	// dead uplink switching nodes is pointless churn
+	internet := err == nil
+	if err != nil && proxy != nil {
+		_, directErr := fetchLatency(w.config.CheckURL, nil, 10*time.Second)
+		internet = directErr == nil
+	}
 
 	w.mu.Lock()
 	w.lastCheck = time.Now()
+	w.proxyChecked = proxy != nil
+	w.internet = internet
 
 	if err != nil {
 		w.connected = false
 		w.lastLatency = -1
 		w.latencyHigh = 0
+
+		if !internet {
+			w.failCount = 0
+			w.mu.Unlock()
+			w.writeLog("[FAIL] У роутера нет интернета (%v) — смена сервера не поможет", err)
+			w.publishStatus()
+			return
+		}
+
 		w.failCount++
 		w.mu.Unlock()
 
-		w.writeLog("[FAIL] Соединение недоступно (%v), попытка %d/%d", err, w.failCount, w.config.MaxFails)
+		w.writeLog("[FAIL] Прокси не отвечает (%v), попытка %d/%d", err, w.failCount, w.config.MaxFails)
 		w.publishStatus()
 
 		if w.failCount >= w.config.MaxFails {
-			w.handleFailover("нет соединения")
+			w.handleFailover("прокси не отвечает", true)
 		}
 		return
 	}
-
-	resp.Body.Close()
-	latency := int(time.Since(start).Milliseconds())
 
 	w.connected = true
 	w.lastLatency = latency
@@ -184,15 +202,19 @@ func (w *Watchdog) check() {
 	}
 	w.mu.Unlock()
 
-	w.writeLog("[OK] Соединение активно (%dms)", latency)
+	if proxy == nil {
+		w.writeLog("[OK] Интернет есть (%dms), но прокси не проверен — нет локального входа в ядро", latency)
+	} else {
+		w.writeLog("[OK] Прокси работает (%dms)", latency)
+	}
 	w.publishStatus()
 
 	if proactive {
-		w.handleFailover(fmt.Sprintf("высокий пинг %dms подряд", latency))
+		w.handleFailover(fmt.Sprintf("высокий пинг %dms подряд", latency), false)
 		return
 	}
 
-	w.superviseExit()
+	w.superviseExit(proxy)
 }
 
 // superviseExit keeps the pinned node in place and watches whether traffic
@@ -200,7 +222,7 @@ func (w *Watchdog) check() {
 //
 // Connectivity alone is not enough: an exit whose IP a CDN blocks answers
 // generate_204 happily while SoundCloud returns 403 and Telegram never loads.
-func (w *Watchdog) superviseExit() {
+func (w *Watchdog) superviseExit(proxy *url.URL) {
 	top := w.detector.Topology()
 	if top.Mode != xkeen.TopologyPool {
 		return
@@ -221,7 +243,12 @@ func (w *Watchdog) superviseExit() {
 		return
 	}
 
-	for _, verdict := range w.health.Probe(healthProbeTimeout) {
+	// Probing services over the direct link would judge the router's ISP, not the exit node
+	if proxy == nil {
+		return
+	}
+
+	for _, verdict := range w.health.Probe(healthProbeTimeout, proxy) {
 		if !verdict.OK {
 			w.writeLog("[HEALTH] %s", verdict)
 		}
@@ -408,7 +435,9 @@ func (w *Watchdog) excludedNodes() map[string]bool {
 	return excluded
 }
 
-func (w *Watchdog) handleFailover(reason string) {
+// handleFailover reacts to a failed or slow proxy. dead means checks through the
+// proxy fail while the router's own link works — the exit node itself is down.
+func (w *Watchdog) handleFailover(reason string, dead bool) {
 	// On Mihomo the proxy-group (url-test/fallback) switches inside the core.
 	// There is nothing to rewrite here: the proxy list is synced when the
 	// subscription updates, and a restart would only drop connections.
@@ -420,7 +449,7 @@ func (w *Watchdog) handleFailover(reason string) {
 	// In pool mode the core's balancer (leastPing + observatory) picks the node
 	// without a restart. The watchdog owns pool membership, not the choice.
 	if top := w.detector.Topology(); top.Mode == xkeen.TopologyPool {
-		w.handlePoolFailover(reason, top)
+		w.handlePoolFailover(reason, top, dead)
 		return
 	}
 
@@ -470,10 +499,11 @@ func (w *Watchdog) handleFailover(reason string) {
 }
 
 // handlePoolFailover refreshes the subscription and brings pool membership in
-// line with it. It restarts only when the pool has actually drifted: a restart
-// drops connections, and switching between live nodes is the balancer's job.
-func (w *Watchdog) handlePoolFailover(reason string, top xkeen.Topology) {
-	w.writeLog("[POOL] %s — выбор ноды за балансировщиком %q, проверяю состав пула", reason, top.BalancerTag)
+// line with it, restarting only when the pool actually drifted. A dead exit is
+// then replaced: the pin overrides the balancer, so leastPing never leaves a
+// pinned node on its own, however dead it is.
+func (w *Watchdog) handlePoolFailover(reason string, top xkeen.Topology, dead bool) {
+	w.writeLog("[POOL] %s — проверяю состав пула", reason)
 
 	if _, err := w.subscription.Refresh(); err != nil {
 		w.writeLog("[WARN] Не удалось обновить подписку: %v", err)
@@ -484,27 +514,28 @@ func (w *Watchdog) handlePoolFailover(reason string, top xkeen.Topology) {
 
 	result, err := xkeen.RefreshPool(w.detector.Runtime(), w.config.OutboundsFile, w.config.XrayAPIAddr, servers, state,
 		xkeen.PoolSelectionFromConfig(w.config, w.geoip))
-	if err != nil {
+	switch {
+	case err != nil:
 		w.writeLog("[ERROR] Пул не синхронизирован: %v", err)
-		return
-	}
-	if !result.Changed {
+	case result.Changed:
+		w.detector.InvalidateTopology()
+		how := "с перезапуском ядра"
+		if result.Live {
+			how = "без перезапуска"
+		}
+		w.writeLog("[POOL] Пул приведён к подписке: +%d, -%d, заменено %d (%s)", len(result.Added), len(result.Removed), len(result.Replaced), how)
+	default:
 		w.writeLog("[POOL] Пул совпадает с подпиской — конфиг не трогаем")
-		return
 	}
-
-	w.detector.InvalidateTopology()
 
 	w.mu.Lock()
 	w.failCount = 0
 	w.latencyHigh = 0
 	w.mu.Unlock()
 
-	how := "с перезапуском ядра"
-	if result.Live {
-		how = "без перезапуска"
+	if dead && w.poolStore != nil {
+		w.rotateExit(w.detector.Runtime(), w.detector.Topology())
 	}
-	w.writeLog("[POOL] Пул приведён к подписке: +%d, -%d, заменено %d (%s)", len(result.Added), len(result.Removed), len(result.Replaced), how)
 }
 
 // selectBest picks the lowest-latency live server, skipping the current one,
@@ -728,6 +759,8 @@ func (w *Watchdog) GetStatus() models.Status {
 
 	status := models.Status{
 		Connected:      w.connected && !restarting,
+		Internet:       w.internet,
+		ProxyChecked:   w.proxyChecked,
 		XrayRunning:    coreRunning,
 		Restarting:     restarting,
 		Latency:        w.lastLatency,

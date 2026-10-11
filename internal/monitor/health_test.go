@@ -43,7 +43,7 @@ func TestProbeURLDetectsBlocks(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := probeURL(serverWith(t, c.status, c.headers), 5*time.Second)
+			got := probeURL(serverWith(t, c.status, c.headers), nil, 5*time.Second)
 
 			if got.OK != c.wantOK {
 				t.Errorf("OK = %v, want %v", got.OK, c.wantOK)
@@ -56,7 +56,7 @@ func TestProbeURLDetectsBlocks(t *testing.T) {
 }
 
 func TestProbeURLUnreachable(t *testing.T) {
-	got := probeURL("http://127.0.0.1:1", 500*time.Millisecond)
+	got := probeURL("http://127.0.0.1:1", nil, 500*time.Millisecond)
 
 	if got.OK || got.Err == nil {
 		t.Errorf("got %+v, want a failure", got)
@@ -73,7 +73,7 @@ func TestHealthCheckerProbesEveryServicePerRound(t *testing.T) {
 
 	checker := NewHealthChecker([]string{a, b, c}, 2, 2)
 
-	got := checker.Probe(2 * time.Second)
+	got := checker.Probe(2*time.Second, nil)
 
 	if len(got) != 3 {
 		t.Fatalf("verdicts = %d, want one per service", len(got))
@@ -100,7 +100,7 @@ func TestExitLooksBlockedNeedsTwoServices(t *testing.T) {
 
 	// bad1 fails twice, good keeps passing: one service is not enough
 	for range 2 {
-		checker.Probe(2 * time.Second)
+		checker.Probe(2*time.Second, nil)
 	}
 	if checker.ExitLooksBlocked() {
 		t.Error("one failing service must not condemn the exit")
@@ -108,7 +108,7 @@ func TestExitLooksBlockedNeedsTwoServices(t *testing.T) {
 
 	checker = NewHealthChecker([]string{bad1, bad2}, 2, 2)
 	for range 2 {
-		checker.Probe(2 * time.Second)
+		checker.Probe(2*time.Second, nil)
 	}
 	if !checker.ExitLooksBlocked() {
 		t.Error("two services failing repeatedly should condemn the exit")
@@ -122,7 +122,7 @@ func TestExitLooksBlockedHonoursQuorum(t *testing.T) {
 
 	checker := NewHealthChecker([]string{bad, good}, 2, 1)
 	for range 2 {
-		checker.Probe(2 * time.Second)
+		checker.Probe(2*time.Second, nil)
 	}
 
 	if !checker.ExitLooksBlocked() {
@@ -149,20 +149,20 @@ func TestHealthCheckerDrainsFailuresGradually(t *testing.T) {
 	checker := NewHealthChecker([]string{srv.URL, bad}, 2, 2)
 
 	for range 3 {
-		checker.Probe(2 * time.Second)
+		checker.Probe(2*time.Second, nil)
 	}
 	if !checker.ExitLooksBlocked() {
 		t.Fatal("both services failing should condemn the exit")
 	}
 
 	// One success is not enough to clear three failures
-	checker.Probe(2 * time.Second)
+	checker.Probe(2*time.Second, nil)
 	if !checker.ExitLooksBlocked() {
 		t.Error("a single success wiped the evidence")
 	}
 
 	for range 3 {
-		checker.Probe(2 * time.Second)
+		checker.Probe(2*time.Second, nil)
 	}
 	if checker.ExitLooksBlocked() {
 		t.Error("a sustained recovery must clear the verdict")
@@ -175,7 +175,7 @@ func TestHealthCheckerResetClearsState(t *testing.T) {
 
 	checker := NewHealthChecker([]string{bad1, bad2}, 2, 2)
 	for range 4 {
-		checker.Probe(2 * time.Second)
+		checker.Probe(2*time.Second, nil)
 	}
 	if !checker.ExitLooksBlocked() {
 		t.Fatal("setup: exit should look blocked")
@@ -212,7 +212,7 @@ func TestProbeUsesGET(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	probeURL(srv.URL, 5*time.Second)
+	probeURL(srv.URL, nil, 5*time.Second)
 
 	if method != http.MethodGet {
 		t.Errorf("method = %q, want GET", method)
@@ -237,7 +237,7 @@ func TestProbeRetriesNetworkErrorOnce(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got := probeURL(srv.URL, 5*time.Second)
+	got := probeURL(srv.URL, nil, 5*time.Second)
 
 	if attempts != 2 {
 		t.Errorf("attempts = %d, want 2 — a network error should be retried", attempts)
@@ -256,7 +256,7 @@ func TestProbeDoesNotRetryBlocks(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if got := probeURL(srv.URL, 5*time.Second); !got.Blocked {
+	if got := probeURL(srv.URL, nil, 5*time.Second); !got.Blocked {
 		t.Errorf("verdict = %+v, want blocked", got)
 	}
 	if attempts != 1 {

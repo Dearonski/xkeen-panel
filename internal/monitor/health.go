@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -70,8 +71,8 @@ func NewHealthChecker(urls []string, threshold, quorum int) *HealthChecker {
 	}
 }
 
-// Probe checks every service and returns the verdicts.
-func (h *HealthChecker) Probe(timeout time.Duration) []healthVerdict {
+// Probe checks every service through proxy and returns the verdicts.
+func (h *HealthChecker) Probe(timeout time.Duration, proxy *url.URL) []healthVerdict {
 	verdicts := make([]healthVerdict, len(h.urls))
 
 	var wg sync.WaitGroup
@@ -79,7 +80,7 @@ func (h *HealthChecker) Probe(timeout time.Duration) []healthVerdict {
 		wg.Add(1)
 		go func(i int, url string) {
 			defer wg.Done()
-			verdicts[i] = probeURL(url, timeout)
+			verdicts[i] = probeURL(url, proxy, timeout)
 		}(i, url)
 	}
 	wg.Wait()
@@ -147,21 +148,22 @@ func (h *HealthChecker) Failing() []string {
 //
 // A network error is retried once: a timeout says far less than a 403 does, and
 // one slow response should not count against the exit node.
-func probeURL(url string, timeout time.Duration) healthVerdict {
-	verdict := probeURLOnce(url, timeout)
+func probeURL(url string, proxy *url.URL, timeout time.Duration) healthVerdict {
+	verdict := probeURLOnce(url, proxy, timeout)
 	if verdict.Err != nil {
-		verdict = probeURLOnce(url, timeout)
+		verdict = probeURLOnce(url, proxy, timeout)
 	}
 	return verdict
 }
 
-func probeURLOnce(url string, timeout time.Duration) healthVerdict {
+func probeURLOnce(url string, proxy *url.URL, timeout time.Duration) healthVerdict {
 	if timeout <= 0 {
 		timeout = 15 * time.Second
 	}
 
 	client := &http.Client{
-		Timeout: timeout,
+		Timeout:   timeout,
+		Transport: proxiedTransport(proxy),
 		// Redirects are normal here; the status of the first hop is enough
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
