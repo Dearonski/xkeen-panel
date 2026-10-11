@@ -199,3 +199,27 @@ func TestPostReadsRefusalFromBody(t *testing.T) {
 		t.Errorf("err = %v, want the router's refusal", err)
 	}
 }
+
+func TestSetNewDevicesVPN(t *testing.T) {
+	var cfg HotspotConfig
+	if err := json.Unmarshal([]byte(hotspotConfigJSON), &cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	srv, calls := recordingServer(t, okAnswer)
+	if err := NewClient(srv.URL, "").SetNewDevicesVPN(cfg, false, "Policy0"); err != nil {
+		t.Fatalf("off: %v", err)
+	}
+	got := *calls
+	if len(got) != 2 || got[0].path != "/rci/ip/hotspot/policy" || got[0].body["interface"] != "Bridge0" || got[0].body["no"] != true {
+		t.Errorf("off calls = %+v, want Bridge0 cleared with no:true, then save", got)
+	}
+
+	srv, calls = recordingServer(t, okAnswer)
+	if err := NewClient(srv.URL, "").SetNewDevicesVPN(cfg, true, "Policy0"); err != nil {
+		t.Fatalf("on: %v", err)
+	}
+	if got := (*calls)[0]; got.body["policy"] != "Policy0" || got.body["interface"] != HomeSegment {
+		t.Errorf("on call = %+v, want the home segment set to Policy0", got)
+	}
+}

@@ -104,3 +104,38 @@ func (h *DevicesHandler) HandleSetVPN(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
 }
+
+// HandleNewDevicesVPN — POST /api/devices/new
+func (h *DevicesHandler) HandleNewDevicesVPN(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		VPN bool `json:"vpn"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "неверный формат запроса"})
+		return
+	}
+
+	c := h.client()
+	policies, err := c.Policies()
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	policy, found := keenetic.XKeenPolicy(policies)
+	if !found {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "на роутере нет политики с описанием xkeen"})
+		return
+	}
+	cfg, err := c.HotspotConfig()
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+
+	if err := c.SetNewDevicesVPN(cfg, req.VPN, policy.Name); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+}

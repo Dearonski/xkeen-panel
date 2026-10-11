@@ -70,6 +70,16 @@ export function DevicesPage() {
         onSettled: () => qc.invalidateQueries({ queryKey: ['devices'] }),
     })
 
+    // Devices following the segment flip with it, so the list is refetched rather than patched
+    const newDevices = useMutation({
+        mutationFn: (vpn: boolean) => api.post('/api/devices/new', { vpn }),
+        onMutate: vpn =>
+            qc.setQueryData<DevicesResponse>(['devices'], old =>
+                old ? { ...old, new_devices_vpn: vpn } : old,
+            ),
+        onSettled: () => qc.invalidateQueries({ queryKey: ['devices'] }),
+    })
+
     if (query.error) {
         return (
             <>
@@ -139,10 +149,27 @@ export function DevicesPage() {
             )}
 
             {data && !policyMissing && (
-                <Group footer='Меняется в веб-интерфейсе Keenetic: политика доступа для сегмента «Домашняя сеть».'>
+                <Group
+                    footer={
+                        newDevices.error ? (
+                            <span className='text-destructive'>
+                                {newDevices.error.message}
+                            </span>
+                        ) : (
+                            'Всё, что впервые подключится к домашней сети, и устройства, у которых в Keenetic выбрана политика сегмента («как вся сеть»).'
+                        )
+                    }
+                >
                     <Row
                         label='Новые устройства через VPN'
-                        detail={data.new_devices_vpn ? 'Да' : 'Нет'}
+                        trailing={
+                            <Switch
+                                checked={data.new_devices_vpn}
+                                onChange={vpn => newDevices.mutate(vpn)}
+                                label='Новые устройства через VPN'
+                                disabled={newDevices.isPending}
+                            />
+                        }
                     />
                 </Group>
             )}

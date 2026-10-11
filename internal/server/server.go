@@ -127,6 +127,7 @@ func (s *Server) Handler() http.Handler {
 
 			r.Get("/devices", devicesHandler.HandleList)
 			r.Post("/devices/vpn", devicesHandler.HandleSetVPN)
+			r.Post("/devices/new", devicesHandler.HandleNewDevicesVPN)
 
 			r.Get("/pool", handlers.HandlePoolStatus)
 			r.Post("/pool/enable", handlers.HandlePoolEnable)

@@ -153,3 +153,28 @@ func (c *Client) SetHostVPN(mac string, on bool, policy string) error {
 
 	return c.post("system/configuration/save", map[string]interface{}{})
 }
+
+// HomeSegment is the interface Keenetic gives the main home network.
+const HomeSegment = "Bridge0"
+
+// SetNewDevicesVPN sets the policy a segment hands to devices that follow it:
+// unregistered ones and those marked `conform`. Turning it off clears every
+// segment that defaults to the policy, so none keeps pulling devices in.
+func (c *Client) SetNewDevicesVPN(cfg HotspotConfig, on bool, policy string) error {
+	if on {
+		if err := c.post("ip/hotspot/policy", map[string]interface{}{"interface": HomeSegment, "policy": policy}); err != nil {
+			return err
+		}
+	} else {
+		for _, p := range cfg.Policy {
+			if p.Policy != policy {
+				continue
+			}
+			if err := c.post("ip/hotspot/policy", map[string]interface{}{"interface": p.Interface, "no": true}); err != nil {
+				return err
+			}
+		}
+	}
+
+	return c.post("system/configuration/save", map[string]interface{}{})
+}
