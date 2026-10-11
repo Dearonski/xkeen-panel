@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+	"xkeen-panel/internal/api"
 	"xkeen-panel/internal/auth"
 	"xkeen-panel/internal/geoip"
 	"xkeen-panel/internal/localtz"
@@ -59,6 +60,9 @@ func main() {
 	cfg, err := loadConfig(*configPath)
 	if err != nil {
 		log.Fatalf("Ошибка загрузки конфига: %v", err)
+	}
+	if err := api.LoadPanelSettings(cfg); err != nil {
+		log.Printf("Предупреждение: настройки из панели не загружены: %v", err)
 	}
 
 	// User manager
@@ -121,15 +125,19 @@ func main() {
 
 	// GeoIP reuses the geoip.dat already installed for Xray
 	var geoMatcher *geoip.Matcher
-	if geoPath := geoip.FindDat(cfg.GeoIPPath); geoPath == "" {
+	geoPath := geoip.FindDat(cfg.GeoIPPath)
+	if geoPath == "" {
 		log.Printf("GeoIP: geoip.dat не найден (%s) — гео-фильтр по IP отключён, используется определение по имени", cfg.GeoIPPath)
-	} else if matcher, err := geoip.Load(geoPath, cfg.AutoSwitchAvoidCountries); err != nil {
+	} else if matcher, err := geoip.Load(geoPath, cfg.AvoidCountries()); err != nil {
 		log.Printf("GeoIP: ошибка загрузки %s: %v — гео-фильтр по IP отключён", geoPath, err)
 	} else {
 		geoMatcher = matcher
 		watchdog.SetGeoIP(matcher)
-		log.Printf("GeoIP: загружен %s (избегаемые страны: %v)", geoPath, cfg.AutoSwitchAvoidCountries)
+		log.Printf("GeoIP: загружен %s (избегаемые страны: %v)", geoPath, cfg.AvoidCountries())
 	}
+
+	refreshReset := make(chan struct{}, 1)
+	panelSettings := api.NewPanelSettingsHandler(cfg, geoMatcher, geoPath, refreshReset)
 
 	// Autostart the watchdog for unattended operation
 	if cfg.WatchdogAutoStart && len(subManager.GetServers()) > 0 {
@@ -161,9 +169,7 @@ func main() {
 	}()
 
 	// Periodic subscription refresh
-	if cfg.SubscriptionRefreshInterval > 0 {
-		go runSubscriptionRefresh(ctx, cfg, subManager, watchdog, detector, poolStore, geoMatcher, eventBus)
-	}
+	go runSubscriptionRefresh(ctx, cfg, subManager, watchdog, detector, poolStore, geoMatcher, eventBus, refreshReset)
 
 	// The process is replaced only after the HTTP server and the watchdog have stopped
 	reexec := make(chan struct{}, 1)
@@ -199,7 +205,7 @@ func main() {
 	}
 
 	// HTTP server
-	srv := server.New(cfg, userManager, subManager, watchdog, detector, poolStore, geoMatcher, eventBus, upd, frontendFS)
+	srv := server.New(cfg, userManager, subManager, watchdog, detector, poolStore, geoMatcher, eventBus, upd, panelSettings, frontendFS)
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Port),
 		Handler: srv.Handler(),
@@ -267,16 +273,20 @@ func panelResponds(port int) bool {
 // runSubscriptionRefresh refreshes the subscription on a timer. The core is
 // restarted only when the active server was actually replaced (it vanished from
 // the subscription) — a refresh must not drop a working connection.
-func runSubscriptionRefresh(ctx context.Context, cfg *models.Config, sm *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, pool *xkeen.PoolStore, matcher *geoip.Matcher, bus *sse.EventBus) {
-	interval := time.Duration(cfg.SubscriptionRefreshInterval) * time.Second
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
+func runSubscriptionRefresh(ctx context.Context, cfg *models.Config, sm *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, pool *xkeen.PoolStore, matcher *geoip.Matcher, bus *sse.EventBus, reset <-chan struct{}) {
 	for {
+		// Re-read every round: the interval is edited from the panel, and 0 turns refreshing off
+		var tick <-chan time.Time
+		if interval := cfg.RefreshInterval(); interval > 0 {
+			tick = time.After(interval)
+		}
+
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-reset:
+			continue
+		case <-tick:
 			prevURI := ""
 			if a := sm.GetActiveServer(); a != nil {
 				prevURI = a.RawURI

@@ -154,7 +154,7 @@ func (sel PoolSelection) isAvoidedCode(code string) bool {
 func PoolSelectionFromConfig(cfg *models.Config, matcher *geoip.Matcher) PoolSelection {
 	return PoolSelection{
 		MaxNodes:         cfg.PoolMaxNodes,
-		AvoidCountries:   cfg.AutoSwitchAvoidCountries,
+		AvoidCountries:   cfg.AvoidCountries(),
 		GeoIP:            matcher,
 		ProbeTimeout:     time.Duration(cfg.ProbeTimeoutMs) * time.Millisecond,
 		ProbeConcurrency: cfg.ProbeConcurrency,

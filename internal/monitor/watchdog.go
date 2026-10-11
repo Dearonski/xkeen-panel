@@ -668,7 +668,7 @@ func (w *Watchdog) isServerAllowed(s models.Server) bool {
 
 func (w *Watchdog) isAvoidedCountry(cc string) bool {
 	cc = strings.ToUpper(cc)
-	for _, a := range w.config.AutoSwitchAvoidCountries {
+	for _, a := range w.config.AvoidCountries() {
 		if strings.ToUpper(strings.TrimSpace(a)) == cc {
 			return true
 		}

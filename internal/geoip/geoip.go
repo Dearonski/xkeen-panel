@@ -28,6 +28,7 @@ type v6entry struct {
 }
 
 type Matcher struct {
+	mu sync.RWMutex
 	v4 []v4range
 	v6 []v6entry
 
@@ -103,6 +104,18 @@ func Load(path string, avoidCodes []string) (*Matcher, error) {
 	return m, nil
 }
 
+// Reload swaps in the ranges for a new set of avoided countries.
+func (m *Matcher) Reload(path string, avoidCodes []string) error {
+	fresh, err := Load(path, avoidCodes)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	m.v4, m.v6 = fresh.v4, fresh.v6
+	m.mu.Unlock()
+	return nil
+}
+
 // countryCodeOf reads country_code (field 1) out of a GeoIP message without parsing its CIDRs.
 func countryCodeOf(geoip []byte) string {
 	var cc string
@@ -171,6 +184,8 @@ func (m *Matcher) Match(ip net.IP) (string, bool) {
 	if m == nil {
 		return "", false
 	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if ip4 := ip.To4(); ip4 != nil {
 		v := binary.BigEndian.Uint32(ip4)
 		idx := sort.Search(len(m.v4), func(i int) bool { return m.v4[i].start > v })

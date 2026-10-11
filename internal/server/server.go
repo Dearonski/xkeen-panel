@@ -31,10 +31,11 @@ type Server struct {
 	geoip        *geoip.Matcher
 	eventBus     *sse.EventBus
 	updater      *updater.Updater
+	settings     *api.PanelSettingsHandler
 	frontendFS   fs.FS
 }
 
-func New(cfg *models.Config, um *auth.UserManager, sub *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, pool *xkeen.PoolStore, matcher *geoip.Matcher, bus *sse.EventBus, upd *updater.Updater, frontendFS fs.FS) *Server {
+func New(cfg *models.Config, um *auth.UserManager, sub *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, pool *xkeen.PoolStore, matcher *geoip.Matcher, bus *sse.EventBus, upd *updater.Updater, settings *api.PanelSettingsHandler, frontendFS fs.FS) *Server {
 	return &Server{
 		config:       cfg,
 		userManager:  um,
@@ -45,6 +46,7 @@ func New(cfg *models.Config, um *auth.UserManager, sub *xkeen.SubscriptionManage
 		geoip:        matcher,
 		eventBus:     bus,
 		updater:      upd,
+		settings:     settings,
 		frontendFS:   frontendFS,
 	}
 }
@@ -119,6 +121,9 @@ func (s *Server) Handler() http.Handler {
 			r.Put("/xkeen/lists/{name}", handlers.HandleUpdateList)
 
 			r.Post("/mihomo/sync", handlers.HandleMihomoSync)
+
+			r.Get("/panel/settings", s.settings.HandleGet)
+			r.Put("/panel/settings", s.settings.HandlePut)
 
 			r.Get("/devices", devicesHandler.HandleList)
 			r.Post("/devices/vpn", devicesHandler.HandleSetVPN)

@@ -1,6 +1,7 @@
 package models
 
 import (
+	"sync"
 	"time"
 
 	"github.com/go-webauthn/webauthn/webauthn"
@@ -66,6 +67,31 @@ type Config struct {
 	WebAuthnRPID    string   `yaml:"webauthn_rp_id"`
 	WebAuthnRPName  string   `yaml:"webauthn_rp_name"`
 	WebAuthnOrigins []string `yaml:"webauthn_origins"`
+
+	// Guards the fields the panel changes at runtime
+	mu sync.RWMutex
+}
+
+// AvoidCountries is the live list of countries automatic switching skips.
+func (c *Config) AvoidCountries() []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return append([]string(nil), c.AutoSwitchAvoidCountries...)
+}
+
+// RefreshInterval is the live subscription refresh period; zero turns it off.
+func (c *Config) RefreshInterval() time.Duration {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return time.Duration(c.SubscriptionRefreshInterval) * time.Second
+}
+
+// SetRuntime replaces the settings the owner edits from the panel.
+func (c *Config) SetRuntime(avoid []string, refreshSec int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.AutoSwitchAvoidCountries = append([]string(nil), avoid...)
+	c.SubscriptionRefreshInterval = refreshSec
 }
 
 // User is the panel account (data/user.json).
