@@ -10,93 +10,65 @@ Skrill0 layout (1.x, `S24xray`) — the layout, the active proxy core
 
 ## Features
 
-- **Subscription management** — add URL, refresh server list
-- **Server selection** — switch active server, with the config validated
-  (`xkeen -xtest`) and rolled back before anything restarts
-- **Balancer pool** — build a `leastPing` pool out of the subscription so Xray
-  picks the node itself and leaves a dead one without a restart
-- **XKeen settings** — edit `xkeen.json`, proxying ports and IP exclusions
-- **Latency check** — real-time per-server ping streaming (SSE)
-- **Watchdog** — automatic connection monitoring and failover to next server
-- **Real-time logs** — via Server-Sent Events, no polling
-- **Authentication** — JWT + TOTP (two-factor)
+- **First-run wizard** — subscription, devices and launch in three steps; on a
+  fresh XKeen install the panel writes the whole Xray config itself
+- **Balancer pool** — the fastest servers of the subscription in a `leastPing`
+  pool; Xray leaves a dead node without a restart
+- **Any server by hand** — pin any subscription server, in the pool or not; if
+  it dies, the panel moves to another server of the same country
+- **Honest status** — checks go through the proxy via a local Xray inbound, so
+  a working router uplink is never mistaken for a working VPN
+- **Devices** — choose which devices go through the VPN; the panel manages the
+  Keenetic `xkeen` policy through the router's own API
+- **Self-update** — installs new releases at night, with rollback
+- **XKeen settings** — proxying ports, port and IP exclusions, GitHub proxy
+- **Authentication** — passkey (Face ID / Touch ID) or password with TOTP
+- **iPhone home screen** — adds as a standalone app
 
 ## Installation
 
 ### Requirements
 
 - Keenetic router with [Entware](https://help.keenetic.com/hc/ru/articles/360021214160)
-- [XKeen](https://github.com/jameszeroX/XKeen) installed (2.x or 1.x)
-- `curl` package (`opkg install curl`)
+  on a USB drive
+- Keenetic components **Netfilter kernel modules** (required) and **IPv6
+  protocol** (recommended), enabled in the router's general settings
 
 ### Quick install
 
-Connect to your router via SSH and run:
+Connect to the router's Entware over SSH (`root`, usually port 222) and run.
+
+Panel and XKeen together, on a router without XKeen:
 
 ```sh
-curl -sL https://raw.githubusercontent.com/Dearonski/xkeen-panel/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Dearonski/xkeen-panel/main/install.sh | sh -s -- --with-xkeen
 ```
 
-If architecture is not detected automatically:
+The panel only, when XKeen is already installed — also the way to update:
 
 ```sh
-# Keenetic Giga, Ultra, Peak and other ARM64 models
-curl -sL https://raw.githubusercontent.com/Dearonski/xkeen-panel/main/install.sh | sh -s aarch64
-
-# Keenetic with MIPS (older models)
-curl -sL https://raw.githubusercontent.com/Dearonski/xkeen-panel/main/install.sh | sh -s mipsel
+curl -fsSL https://raw.githubusercontent.com/Dearonski/xkeen-panel/main/install.sh | sh
 ```
 
-### Manual installation
+Then open `http://<router IP>:3000`, create an account and follow the wizard.
 
-```sh
-# 1. Download binary (choose your architecture)
-curl -L -o /opt/sbin/xkeen-panel \
-  https://github.com/Dearonski/xkeen-panel/releases/latest/download/xkeen-panel-aarch64
-chmod +x /opt/sbin/xkeen-panel
+Installer options:
 
-# 2. Create directories
-mkdir -p /opt/etc/xkeen-panel/data
+| Option | Effect |
+|--------|--------|
+| `--with-xkeen` | Install XKeen first if it is missing (Xray core, geo databases, no GeoIPSET) |
+| `--mihomo` | With `--with-xkeen`, install the Mihomo core as well |
+| `--check` | Only check the router — components, free space, GitHub access — and change nothing |
+| `aarch64` / `mipsel` | Override the detected architecture |
 
-# 3. Create config
-cat > /opt/etc/xkeen-panel/config.yaml << 'EOF'
-port: 3000
-data_dir: /opt/etc/xkeen-panel/data
-xkeen_path: /opt/sbin/xkeen
-outbounds_file: /opt/etc/xray/configs/04_outbounds.json
-check_interval: 120
-check_url: https://www.google.com
-max_fails: 3
-log_file: /opt/var/log/xkeen-panel.log
-EOF
+Downloads fall back to GitHub mirrors when GitHub is unreachable, and the panel
+binary is checked against the release's `SHA256SUMS`. An existing
+`config.yaml` is never overwritten; the previous binary is kept as
+`/opt/sbin/xkeen-panel.bak`.
 
-# 4. Create log directory
-mkdir -p /opt/var/log
-
-# 5. Create init script for autostart
-cat > /opt/etc/init.d/S99xkeen-panel << 'EOF'
-#!/bin/sh
-
-ENABLED=yes
-PROCS="xkeen-panel"
-ARGS="-config /opt/etc/xkeen-panel/config.yaml"
-DESC="XKeen Panel"
-
-PREARGS=""
-. /opt/etc/init.d/rc.func
-EOF
-chmod +x /opt/etc/init.d/S99xkeen-panel
-
-# 6. Start
-/opt/etc/init.d/S99xkeen-panel start
-```
-
-### After installation
-
-1. Open `http://<router IP>:3000` in your browser
-2. Create an account (username + password)
-3. Scan the QR code for TOTP (Google Authenticator, Aegis, etc.)
-4. Log in with username, password and code from the app
+> Installing XKeen through `--with-xkeen` runs XKeen's own non-interactive
+> installer (`xkeen -i auto`) with autostart left off — the wizard turns it on
+> once the panel has written a working config.
 
 ## Usage
 
@@ -109,23 +81,6 @@ chmod +x /opt/etc/init.d/S99xkeen-panel
 # Logs
 tail -f /opt/var/log/xkeen-panel.log
 ```
-
-## Updating
-
-```sh
-# Stop the panel
-/opt/etc/init.d/S99xkeen-panel stop
-
-# Download new version
-curl -L -o /opt/sbin/xkeen-panel \
-  https://github.com/Dearonski/xkeen-panel/releases/latest/download/xkeen-panel-aarch64
-chmod +x /opt/sbin/xkeen-panel
-
-# Start
-/opt/etc/init.d/S99xkeen-panel start
-```
-
-Or re-run install.sh — it won't overwrite your config.
 
 ## Configuration
 
@@ -141,22 +96,34 @@ File: `/opt/etc/xkeen-panel/config.yaml`
 | `routing_file` | auto | Routing config; auto-detected among the config files |
 | `mihomo_config` | auto | `/opt/etc/mihomo/config.yaml` |
 | `xkeen_json` | auto | `/opt/etc/xkeen/xkeen.json` |
-| `xray_api_addr` | `127.0.0.1:10085` | Xray gRPC API, used to pin a pool node |
+| `xray_api_addr` | `127.0.0.1:10085` | Xray gRPC API, used to pin a node |
+| `probe_addr` | `127.0.0.1:10086` | Local socks inbound the panel checks the proxy through |
 | `check_interval` | `120` | Watchdog check interval (seconds) |
 | `check_url` | `https://www.google.com` | URL for connection check |
 | `max_fails` | `3` | Consecutive failures before server switch |
+| `auto_switch_avoid_countries` | `[RU, BY]` | Countries the pool and automatic switching skip |
+| `subscription_refresh_interval` | `1800` | Subscription refresh period (seconds), `0` = off |
 
 Paths left empty are detected on startup, so an install that moved its configs
-only needs the ones that differ.
+only needs the ones that differ. Avoided countries and the refresh period can
+also be changed in the panel; those choices are stored in `data/settings.json`
+and take precedence, so `config.yaml` is never rewritten.
 
 ## How the panel edits your config
 
+- **A fresh install is configured from scratch.** When Xray has no proxy
+  outbound at all, adding a subscription writes a pool, `direct`/`block`
+  outbounds with `sockopt.mark` 255, and routing that sends Russian domains,
+  Russian IPs and local networks direct and everything else through the pool.
 - **The outbound shape is preserved.** Xray accepts both `settings.vnext[]` and
   the newer flat `settings.{address,port,id}`; whichever your config uses is
   kept, and so is `raw` as the spelling of the `tcp` transport.
-- **`streamSettings.sockopt` survives.** XKeen validates `sockopt.mark` on every
-  real outbound — strict PBR refuses to start without it — so the panel merges
-  its changes over the existing outbound instead of replacing it.
+- **`streamSettings.sockopt` survives.** XKeen checks `sockopt.mark` on every
+  real outbound to proxy the router's own traffic, so the panel merges its
+  changes over the existing outbound instead of replacing it.
+- **Checks have their own inbound.** The panel adds `00_panel_probe.json` (a
+  socks inbound on `probe_addr`) and one rule at the top of the routing file
+  sending it where client traffic goes.
 - **Comments are read, not written.** Xray configs legally carry `//` and
   `/* */`; the panel parses through them, but a file it writes comes back
   without them. The previous content is always kept as `.bak` next to the file.
@@ -183,6 +150,6 @@ make build-mipsel  # Keenetic older models
 
 ## Stack
 
-- **Backend:** Go, chi router, JWT, TOTP, SSE
+- **Backend:** Go, chi router, JWT, TOTP, WebAuthn, SSE
 - **Frontend:** React 19, Vite, Tailwind CSS 4, TanStack Query
 - Frontend is embedded into the binary via `go:embed`
