@@ -41,10 +41,7 @@ func DescribePool(nodes []PoolNode, excluded map[string]time.Time) []PoolNodeVie
 			view.ServerID = server.ID
 			view.Name = server.Name
 			view.Latency = server.Latency
-			view.Country = server.CountryOverride
-			if view.Country == "" {
-				view.Country = server.Country
-			}
+			view.Country = ServerCountry(*server)
 		}
 
 		if until, ok := excluded[node.Tag]; ok && time.Now().Before(until) {
@@ -56,6 +53,15 @@ func DescribePool(nodes []PoolNode, excluded map[string]time.Time) []PoolNodeVie
 	}
 
 	return views
+}
+
+// ServerCountry is the owner's override when set, otherwise the country read
+// from the server name.
+func ServerCountry(server models.Server) string {
+	if server.CountryOverride != "" {
+		return server.CountryOverride
+	}
+	return server.Country
 }
 
 func ServerForNode(servers []models.Server, node string) (models.Server, bool) {
@@ -70,12 +76,22 @@ func ServerForNode(servers []models.Server, node string) (models.Server, bool) {
 	return models.Server{}, false
 }
 
-func PoolTagsByServer(nodes []PoolNode) map[int]string {
-	tags := make(map[int]string, len(nodes))
+// PoolTagsByNode maps node keys to pool tags. Keyed by endpoint, not server ID:
+// a subscription can list one node under several names, and each of them is
+// that pool member.
+func PoolTagsByNode(nodes []PoolNode) map[string]string {
+	tags := make(map[string]string, len(nodes))
 	for _, node := range nodes {
-		if node.Server != nil {
-			tags[node.Server.ID] = node.Tag
-		}
+		tags[endpoint{Address: node.Address, Port: node.Port, UUID: node.UUID}.Key()] = node.Tag
 	}
 	return tags
+}
+
+// NodeKeyOfServer is the identity a pin stores for this server, empty when the
+// server has no VLESS endpoint.
+func NodeKeyOfServer(server models.Server) string {
+	if ep, ok := endpointOfServer(server); ok {
+		return ep.Key()
+	}
+	return ""
 }

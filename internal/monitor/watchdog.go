@@ -296,8 +296,8 @@ func (w *Watchdog) superviseP(rt xkeen.Runtime, top xkeen.Topology) {
 
 	if xkeen.PinDrifted(w.config.OutboundsFile, top.Selector(), state.PinnedTag, state.PinnedNode) {
 		w.writeLog("[PIN] %s больше не ведёт на закреплённый сервер — выбираю заново", state.PinnedTag)
-		if state.PinManual {
-			w.dropManual("выбранный вручную сервер ушёл из пула после обновления подписки")
+		if state.PinManual && w.keepManualPick(state) {
+			return
 		}
 		tag, err := w.pinBest(rt, top)
 		if err != nil {
@@ -319,7 +319,26 @@ func (w *Watchdog) superviseP(rt xkeen.Runtime, top xkeen.Topology) {
 	}
 }
 
-// rotateExit condemns the current node and pins the next best one.
+// keepManualPick follows a hand-picked server out of the pool: a refresh that
+// reshuffles the fastest nodes is no reason to drop the owner's choice.
+func (w *Watchdog) keepManualPick(state xkeen.PoolState) bool {
+	if server, ok := xkeen.ServerForNode(w.subscription.GetServers(), state.PinnedNode); ok {
+		_, err := w.PinServer(server, true, state.PinNote)
+		if err == nil {
+			return true
+		}
+		w.writeLog("[PIN] Не удалось сохранить ручной выбор %s: %v", server.Name, err)
+	} else if w.replaceManualPick(state) {
+		return true
+	}
+
+	w.dropManual("выбранного вручную сервера больше нет в подписке, а замены в той же стране нет")
+	return false
+}
+
+// rotateExit condemns the current node and pins the next best one. A manual
+// pick is replaced from its own country first; the pool takes over only when
+// that country has nothing live left.
 func (w *Watchdog) rotateExit(rt xkeen.Runtime, top xkeen.Topology) {
 	if w.poolStore == nil {
 		return
@@ -327,7 +346,13 @@ func (w *Watchdog) rotateExit(rt xkeen.Runtime, top xkeen.Topology) {
 
 	state := w.poolStore.Get()
 	if state.PinManual {
-		w.dropManual(fmt.Sprintf("через выбранную вручную ноду %s перестали работать сервисы", state.PinnedTag))
+		if w.replaceManualPick(state) {
+			w.mu.Lock()
+			w.lastRotation = time.Now()
+			w.mu.Unlock()
+			return
+		}
+		w.dropManual(fmt.Sprintf("выбранный вручную сервер (%s) перестал работать, а замены в той же стране нет", state.PinnedTag))
 	}
 
 	if current := state.PinnedTag; current != "" {
@@ -622,10 +647,7 @@ func (w *Watchdog) AllowedActiveOrBest() *models.Server {
 // name is the fallback.
 func (w *Watchdog) isServerAllowed(s models.Server) bool {
 	// Manual override or name-derived country: an avoided one is an immediate no
-	effCountry := s.CountryOverride
-	if effCountry == "" {
-		effCountry = s.Country
-	}
+	effCountry := xkeen.ServerCountry(s)
 	if effCountry != "" && w.isAvoidedCountry(effCountry) {
 		return false
 	}

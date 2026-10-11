@@ -206,6 +206,8 @@ func SyncPool(rt Runtime, outboundsPath string, servers []models.Server, state P
 		return err
 	}
 
+	// The manual slot may be what traffic is pinned to right now
+	nodes = append(nodes, manualOutbounds(outbounds)...)
 	config["outbounds"] = append(nodes, serviceOutbounds(outbounds)...)
 
 	return applyConfigs(rt, map[string]map[string]interface{}{outboundsPath: config})

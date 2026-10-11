@@ -126,11 +126,7 @@ func (sel PoolSelection) rankByLatency(servers []models.Server) []models.Server 
 }
 
 func (sel PoolSelection) avoided(server models.Server) bool {
-	country := server.CountryOverride
-	if country == "" {
-		country = server.Country
-	}
-	if country != "" && sel.isAvoidedCode(country) {
+	if country := ServerCountry(server); country != "" && sel.isAvoidedCode(country) {
 		return true
 	}
 

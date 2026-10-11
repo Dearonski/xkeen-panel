@@ -52,7 +52,6 @@ export function ServerCard({
                 'transition-colors',
                 server.active &&
                     'border-emerald-500/50 shadow-[0_0_12px_rgba(16,185,129,0.08)]',
-                outsidePool && 'opacity-60',
             )}
         >
             <CardContent className='flex items-start justify-between gap-3 py-3'>
@@ -153,23 +152,25 @@ export function ServerCard({
                     </div>
                 </div>
 
-                {outsidePool && (
-                    <span
-                        className='shrink-0 text-xs text-muted-foreground'
-                        title='Пул собирается из лучших серверов подписки — закрепить можно только ноду из него'
-                    >
-                        не в пуле
-                    </span>
-                )}
-                {!server.active && !outsidePool && (
-                    <Button
-                        size='sm'
-                        variant='outline'
-                        onClick={() => onSelect(server.id)}
-                        disabled={loading}
-                    >
-                        {poolMode ? 'Закрепить' : 'Выбрать'}
-                    </Button>
+                {!server.active && (
+                    <div className='flex shrink-0 flex-col items-end gap-1'>
+                        <Button
+                            size='sm'
+                            variant='outline'
+                            onClick={() => onSelect(server.id)}
+                            disabled={loading}
+                        >
+                            {poolMode ? 'Закрепить' : 'Выбрать'}
+                        </Button>
+                        {outsidePool && (
+                            <span
+                                className='text-xs text-muted-foreground'
+                                title='Сервер не входит в пул лучших — будет подключён отдельно, без перезапуска'
+                            >
+                                вне пула
+                            </span>
+                        )}
+                    </div>
                 )}
             </CardContent>
         </Card>

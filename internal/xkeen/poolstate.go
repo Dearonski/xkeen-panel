@@ -30,6 +30,10 @@ type PoolState struct {
 	PinManual bool `json:"pin_manual,omitempty"`
 
 	PinNote string `json:"pin_note,omitempty"`
+
+	// The country the owner picked by hand. A replacement for a dead manual pick
+	// comes from the same country, since the country is usually why it was picked.
+	PinCountry string `json:"pin_country,omitempty"`
 }
 
 // PoolStore persists PoolState next to the panel's other data.
@@ -90,12 +94,20 @@ func (s *PoolStore) Set(state PoolState) error {
 // a balancer override lives only in Xray's memory — and so that the tag moving
 // to a different server is detectable.
 func (s *PoolStore) SetPinned(tag, node string, manual bool) error {
+	return s.SetPinnedServer(tag, node, manual, "", "")
+}
+
+// SetPinnedServer records a pin together with the country it was chosen for
+// and the note explaining it to the owner.
+func (s *PoolStore) SetPinnedServer(tag, node string, manual bool, country, note string) error {
 	state := s.Get()
 	state.PinnedTag = tag
 	state.PinnedNode = node
 	state.PinManual = manual
+	state.PinCountry = ""
 	if manual {
-		state.PinNote = ""
+		state.PinCountry = country
+		state.PinNote = note
 	}
 	return s.Set(state)
 }
@@ -103,6 +115,7 @@ func (s *PoolStore) SetPinned(tag, node string, manual bool) error {
 func (s *PoolStore) DropManual(note string) error {
 	state := s.Get()
 	state.PinManual = false
+	state.PinCountry = ""
 	state.PinNote = note
 	return s.Set(state)
 }

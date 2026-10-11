@@ -71,24 +71,26 @@ func TestServerForNodeFindsPinnedServer(t *testing.T) {
 	}
 }
 
-func TestPoolTagsByServer(t *testing.T) {
+// One node listed twice under different names is one pool member: both entries
+// must show it, or the second one reads as outside the pool.
+func TestPoolTagsByNodeCoversDuplicates(t *testing.T) {
 	rt, outboundsPath := liveConfDir(t)
-	servers := poolServers()
-	for i := range servers {
-		servers[i].ID = i
-	}
-	if _, err := EnablePool(rt, outboundsPath, servers, PoolOptions{}); err != nil {
+	if _, err := EnablePool(rt, outboundsPath, poolServers(), PoolOptions{}); err != nil {
 		t.Fatalf("EnablePool: %v", err)
 	}
 
-	nodes, err := PoolNodes(outboundsPath, DefaultPoolSelector, servers[1:])
+	nodes, err := PoolNodes(outboundsPath, DefaultPoolSelector, poolServers())
 	if err != nil {
 		t.Fatalf("PoolNodes: %v", err)
 	}
+	tags := PoolTagsByNode(nodes)
 
-	tags := PoolTagsByServer(nodes)
-	if len(tags) != 1 || tags[1] != "sub-2" {
-		t.Errorf("tags = %v, want only server 1 on sub-2", tags)
+	alias := models.Server{Name: "NL again", Protocol: "vless", RawURI: realityURI + "#alias"}
+	if got := tags[NodeKeyOfServer(alias)]; got != "sub-1" {
+		t.Errorf("alias of the first node maps to %q, want sub-1", got)
+	}
+	if got := tags[NodeKeyOfServer(models.Server{RawURI: wsURI})]; got != "sub-2" {
+		t.Errorf("second node maps to %q, want sub-2", got)
 	}
 }
 

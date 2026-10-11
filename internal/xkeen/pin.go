@@ -61,6 +61,17 @@ func PoolNodes(outboundsPath, selector string, servers []models.Server) ([]PoolN
 // NodeKeyForTag returns the stable identity of the node a tag currently carries.
 // Empty when the tag is gone from the pool.
 func NodeKeyForTag(outboundsPath, selector, tag string) string {
+	if tag == ManualTag {
+		config, err := ReadOutboundsConfig(outboundsPath)
+		if err != nil {
+			return ""
+		}
+		if ep, ok := endpointOfOutbound(manualOutbound(asSlice(config["outbounds"]))); ok {
+			return ep.Key()
+		}
+		return ""
+	}
+
 	layout, err := ReadPoolLayout(outboundsPath, selector)
 	if err != nil {
 		return ""

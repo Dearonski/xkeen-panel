@@ -144,17 +144,17 @@ func (h *Handlers) HandleGetServers(w http.ResponseWriter, r *http.Request) {
 
 	// In pool mode the active entry is the pinned node, not the server the pool was built from
 	if top := h.detector.Topology(); top.Mode == xkeen.TopologyPool {
-		state := h.pool.Get()
-		pinned, hasPinned := xkeen.ServerForNode(servers, state.PinnedNode)
+		pinned := h.pool.Get().PinnedNode
 
-		var tags map[int]string
+		var tags map[string]string
 		if nodes, err := xkeen.PoolNodes(h.config.OutboundsFile, top.Selector(), servers); err == nil {
-			tags = xkeen.PoolTagsByServer(nodes)
+			tags = xkeen.PoolTagsByNode(nodes)
 		}
 
 		for i := range views {
-			views[i].PoolTag = tags[views[i].ID]
-			views[i].Active = hasPinned && views[i].RawURI == pinned.RawURI
+			key := xkeen.NodeKeyOfServer(views[i].Server)
+			views[i].PoolTag = tags[key]
+			views[i].Active = key != "" && key == pinned
 		}
 	}
 
@@ -212,10 +212,10 @@ func (h *Handlers) HandleSelectServer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// In pool mode the balancer picks the node, so a manual choice is an override
-	// through the core API: instant, no restart
+	// In pool mode a manual choice is a balancer override through the core API,
+	// even for a server outside the pool: it goes into the manual slot first
 	if top := h.detector.Topology(); top.Mode == xkeen.TopologyPool {
-		if err := h.pinServer(rt, top, server); err != nil {
+		if _, err := h.watchdog.PinServer(*server, true, ""); err != nil {
 			log.Printf("[SELECT] Ошибка закрепления ноды: %v", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -252,22 +252,6 @@ func (h *Handlers) HandleSelectServer(w http.ResponseWriter, r *http.Request) {
 		"server":     server,
 		"restarting": true,
 	})
-}
-
-// Matched by endpoint: the pool holds only the best nodes, so a subscription index says nothing about them.
-func (h *Handlers) pinServer(rt xkeen.Runtime, top xkeen.Topology, server *models.Server) error {
-	nodes, err := xkeen.PoolNodes(h.config.OutboundsFile, top.Selector(), []models.Server{*server})
-	if err != nil {
-		return err
-	}
-
-	for _, node := range nodes {
-		if node.Server != nil {
-			return h.pinTag(rt, top, node.Tag)
-		}
-	}
-
-	return fmt.Errorf("сервер %q не входит в пул (в нём %d лучших нод) — выберите один из них", server.Name, len(nodes))
 }
 
 func (h *Handlers) pinTag(rt xkeen.Runtime, top xkeen.Topology, tag string) error {
