@@ -10,7 +10,6 @@
     },
     "dependencies": {
         "@base-ui/react": "^1.2.0",
-        "@fontsource-variable/geist": "^5.2.8",
         "@tabler/icons-react": "^3.36.1",
         "@tanstack/react-query": "^5.80.7",
         "class-variance-authority": "^0.7.1",
@@ -24,12 +23,12 @@
     },
     "devDependencies": {
         "@tailwindcss/vite": "^4.1.17",
-        "shadcn": "^3.8.5",
         "@types/node": "^25.3.0",
         "@types/react": "^19.2.7",
         "@types/react-dom": "^19.2.3",
         "@vitejs/plugin-react": "^5.1.1",
         "prettier": "^3.8.1",
+        "shadcn": "^3.8.5",
         "typescript": "~5.9.3",
         "vite": "^7.3.1"
     }
