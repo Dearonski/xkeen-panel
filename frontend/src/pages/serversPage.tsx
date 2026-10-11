@@ -182,7 +182,7 @@ export function ServersPage() {
                     <div
                         role='group'
                         aria-label='Страна'
-                        className='-mx-4 flex gap-2 overflow-x-auto px-4 [mask-image:linear-gradient(to_right,transparent,black_16px,black_calc(100%-40px),transparent)] [scrollbar-width:none]'
+                        className='-mx-4 flex gap-2 overflow-x-auto px-4 [mask-image:linear-gradient(to_right,transparent,black_16px,black_calc(100%-40px),transparent)] [-webkit-mask-image:linear-gradient(to_right,transparent,black_16px,black_calc(100%-40px),transparent)] [scrollbar-width:none]'
                     >
                         {['all', ...countries].map(c => (
                             <button
