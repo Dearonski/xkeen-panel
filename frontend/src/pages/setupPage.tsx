@@ -8,6 +8,7 @@ import {
     CardDescription,
 } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Logo } from '@/components/logo'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { TOTPSetup } from '@/components/totpSetup'
@@ -59,10 +60,14 @@ export function SetupPage() {
 
     return (
         <div className='min-h-screen flex items-center justify-center p-4'>
+            <div aria-hidden className='bg-page fixed inset-0 -z-10' />
             <div className='w-full max-w-md'>
+                <div className='mb-5 flex justify-center'>
+                    <Logo size={56} />
+                </div>
                 <Card>
                     <CardHeader className='text-center'>
-                        <CardTitle className='text-2xl'>XKeen Panel</CardTitle>
+                        <CardTitle className='text-2xl'>XKeen</CardTitle>
                         <CardDescription>Первичная настройка</CardDescription>
                     </CardHeader>
                     <CardContent>
