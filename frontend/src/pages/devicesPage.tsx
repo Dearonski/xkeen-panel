@@ -153,7 +153,7 @@ export function DevicesPage() {
                 </p>
             )}
 
-            <div className='grid gap-4 lg:grid-cols-2 lg:items-start'>
+            <div className='grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start'>
                 {online.length > 0 && (
                     <Group title='В сети'>{online.map(row)}</Group>
                 )}

@@ -66,7 +66,7 @@ export function XkeenSettingsPage() {
                 subtitle='Изменения списков применяются после перезапуска XKeen'
             />
 
-            <div className='grid gap-5 lg:grid-cols-2 lg:items-start'>
+            <div className='grid grid-cols-1 gap-5 lg:grid-cols-2 lg:items-start'>
                 {LISTS.map(list => (
                     <ListEditor key={list.name} {...list} />
                 ))}

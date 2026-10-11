@@ -54,7 +54,7 @@ export function SettingsPage() {
         <>
             <PageTitle title='Настройки' />
 
-            <div className='grid gap-5 lg:grid-cols-2 lg:items-start'>
+            <div className='grid grid-cols-1 gap-5 lg:grid-cols-2 lg:items-start'>
                 <Group
                     title='Автоматика'
                     footer='Панель проверяет связь через VPN каждые 2 минуты. Если сервер перестал работать, она переключится на другой — при ручном выборе на сервер той же страны.'

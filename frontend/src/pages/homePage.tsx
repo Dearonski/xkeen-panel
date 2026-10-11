@@ -70,7 +70,7 @@ export function HomePage() {
                 Главная
             </h1>
 
-            <div className='grid gap-4 lg:grid-cols-2 lg:items-start'>
+            <div className='grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start'>
                 <div className='flex flex-col gap-4'>
                     <section className='flex flex-col gap-3.5 rounded-card bg-card p-[18px]'>
                         <div className='flex items-center gap-3.5'>
