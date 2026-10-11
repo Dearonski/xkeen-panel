@@ -177,3 +177,60 @@ func (c *Client) Hosts() ([]Host, error) {
 	}
 	return raw.Host, nil
 }
+
+// WANInterface carries the default route; a policy without it leaves its devices offline
+func (c *Client) WANInterface() (string, error) {
+	var ifaces map[string]struct {
+		DefaultGW bool `json:"defaultgw"`
+		Global    bool `json:"global"`
+	}
+	if err := c.get("show/interface", &ifaces); err != nil {
+		return "", err
+	}
+	for id, iface := range ifaces {
+		if iface.DefaultGW && iface.Global {
+			return id, nil
+		}
+	}
+	return "", fmt.Errorf("не найден интерфейс с маршрутом по умолчанию")
+}
+
+// CreateXKeenPolicy adds the policy XKeen proxies, under the first free PolicyN name
+func (c *Client) CreateXKeenPolicy() (Policy, error) {
+	policies, err := c.Policies()
+	if err != nil {
+		return Policy{}, err
+	}
+	if p, ok := XKeenPolicy(policies); ok {
+		return p, nil
+	}
+
+	wan, err := c.WANInterface()
+	if err != nil {
+		return Policy{}, err
+	}
+
+	taken := make(map[string]bool, len(policies))
+	for _, p := range policies {
+		taken[p.Name] = true
+	}
+	name := ""
+	for i := 0; name == ""; i++ {
+		if candidate := fmt.Sprintf("Policy%d", i); !taken[candidate] {
+			name = candidate
+		}
+	}
+
+	if err := c.post("ip/policy", map[string]interface{}{
+		"name":        name,
+		"description": PolicyDescription,
+		"permit":      map[string]interface{}{"global": true, "interface": wan},
+	}); err != nil {
+		return Policy{}, err
+	}
+	if err := c.post("system/configuration/save", map[string]interface{}{}); err != nil {
+		return Policy{}, err
+	}
+
+	return Policy{Name: name, Description: PolicyDescription}, nil
+}

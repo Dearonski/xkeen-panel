@@ -66,6 +66,7 @@ func (s *Server) Handler() http.Handler {
 	webAuthnHandler := api.NewWebAuthnHandler(s.userManager, rateLimiter, s.config)
 	updateHandler := api.NewUpdateHandler(s.updater)
 	devicesHandler := api.NewDevicesHandler(s.detector, keenetic.DefaultAddr)
+	setupHandler := api.NewSetupHandler(s.detector, s.subscription, s.watchdog, devicesHandler)
 	handlers := api.NewHandlers(s.config, s.subscription, s.watchdog, s.detector, s.pool, s.geoip)
 
 	// API routes
@@ -121,6 +122,10 @@ func (s *Server) Handler() http.Handler {
 			r.Put("/xkeen/lists/{name}", handlers.HandleUpdateList)
 
 			r.Post("/mihomo/sync", handlers.HandleMihomoSync)
+
+			r.Get("/setup/state", setupHandler.HandleState)
+			r.Post("/setup/policy", setupHandler.HandlePolicy)
+			r.Post("/setup/finish", setupHandler.HandleFinish)
 
 			r.Get("/panel/settings", s.settings.HandleGet)
 			r.Put("/panel/settings", s.settings.HandlePut)

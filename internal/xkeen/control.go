@@ -117,6 +117,15 @@ func Start(dispatcher string) (string, error) {
 	return runXkeen(dispatcher, restartTimeout, "-start")
 }
 
+// SetAutostart makes XKeen start the proxy on boot, or stop doing so.
+func SetAutostart(dispatcher string, on bool) (string, error) {
+	state := "off"
+	if on {
+		state = "on"
+	}
+	return runXkeen(dispatcher, quickTimeout, "-auto", state)
+}
+
 // Stop stops the proxy core.
 func Stop(dispatcher string) (string, error) {
 	return runXkeen(dispatcher, quickTimeout, "-stop")

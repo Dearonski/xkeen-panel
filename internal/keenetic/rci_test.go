@@ -223,3 +223,44 @@ func TestSetNewDevicesVPN(t *testing.T) {
 		t.Errorf("on call = %+v, want the home segment set to Policy0", got)
 	}
 }
+
+func TestCreateXKeenPolicyPicksFreeNameAndWAN(t *testing.T) {
+	var posted []recorded
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rci/show/ip/policy":
+			w.Write([]byte(`{"Policy0":{"description":"guests"},"Policy1":{"description":"kids"}}`))
+		case "/rci/show/interface":
+			w.Write([]byte(`{"Bridge0":{"global":false},"PPPoE0":{"defaultgw":true,"global":true},"GigabitEthernet1":{"global":true}}`))
+		default:
+			var body map[string]interface{}
+			json.NewDecoder(r.Body).Decode(&body)
+			posted = append(posted, recorded{r.URL.Path, body})
+			w.Write([]byte(okAnswer))
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	p, err := NewClient(srv.URL, "").CreateXKeenPolicy()
+	if err != nil {
+		t.Fatalf("CreateXKeenPolicy: %v", err)
+	}
+	if p.Name != "Policy2" {
+		t.Errorf("name = %s, want the first free one, Policy2", p.Name)
+	}
+	if len(posted) != 2 || posted[0].path != "/rci/ip/policy" || posted[1].path != "/rci/system/configuration/save" {
+		t.Fatalf("calls = %+v, want create then save", posted)
+	}
+	permit, _ := posted[0].body["permit"].(map[string]interface{})
+	if posted[0].body["description"] != "xkeen" || permit["interface"] != "PPPoE0" {
+		t.Errorf("create body = %v, want description xkeen and the default-route WAN", posted[0].body)
+	}
+}
+
+func TestCreateXKeenPolicyKeepsExisting(t *testing.T) {
+	c := NewClient(rciServer(t, "").URL, "")
+	p, err := c.CreateXKeenPolicy()
+	if err != nil || p.Name != "Policy0" {
+		t.Errorf("got %+v, %v — an existing xkeen policy must be reused, not duplicated", p, err)
+	}
+}

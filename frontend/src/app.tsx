@@ -10,6 +10,7 @@ import { SettingsPage } from '@/pages/settingsPage'
 import { UpdatePage } from '@/pages/updatePage'
 import { XkeenSettingsPage } from '@/pages/xkeenSettingsPage'
 import { DiagnosticsPage } from '@/pages/diagnosticsPage'
+import { WelcomePage } from '@/pages/welcomePage'
 import { ProtectedRoute } from '@/components/protectedRoute'
 import type { AuthStatus } from '@/types'
 
@@ -44,6 +45,14 @@ export function App() {
                 ) : (
                     <>
                         <Route path='/login' element={<LoginPage />} />
+                        <Route
+                            path='/welcome'
+                            element={
+                                <ProtectedRoute>
+                                    <WelcomePage />
+                                </ProtectedRoute>
+                            }
+                        />
                         <Route
                             element={
                                 <ProtectedRoute>

@@ -53,6 +53,9 @@ func TestRuntimeDetectsFork2(t *testing.T) {
 	if !r.Installed {
 		t.Error("Installed = false, want true")
 	}
+	if !r.Autostart {
+		t.Error("Autostart = false, want true — start_auto=\"on\" in S05xkeen")
+	}
 	if want := filepath.Join(root, "opt/etc/xray/configs/05_routing.json"); r.RoutingFile != want {
 		t.Errorf("RoutingFile = %q, want %q", r.RoutingFile, want)
 	}

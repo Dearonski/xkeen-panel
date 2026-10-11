@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { Link, Outlet, useLocation } from 'react-router-dom'
+import { Link, Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import {
     IconActivity,
@@ -19,6 +19,7 @@ import { Logo } from '@/components/logo'
 import { useEventSource } from '@/hooks/useEventSource'
 import { useIndicator } from '@/hooks/useIndicator'
 import { useStatus } from '@/hooks/usePanelData'
+import { SETUP_LATER_KEY, useSetupState } from '@/pages/welcomePage'
 import { statusInfo, toneDot, toneText } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
@@ -58,6 +59,11 @@ export function AppShell() {
     const tabbarRef = useRef<HTMLElement>(null)
     const sidebarPill = useIndicator(sidebarRef, onDiagnostics ? -1 : active)
     const tabbarPill = useIndicator(tabbarRef, active)
+
+    const setup = useSetupState().data
+    if (setup && !setup.subscription && !setupPostponed()) {
+        return <Navigate to='/welcome' replace />
+    }
 
     return (
         <div className='min-h-dvh lg:flex lg:gap-6 lg:p-3'>
@@ -227,6 +233,14 @@ function SidebarLink({
             {label}
         </Link>
     )
+}
+
+function setupPostponed() {
+    try {
+        return sessionStorage.getItem(SETUP_LATER_KEY) === '1'
+    } catch {
+        return false
+    }
 }
 
 // The open page keeps running the old bundle after the panel updates itself

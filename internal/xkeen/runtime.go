@@ -30,6 +30,7 @@ type Runtime struct {
 	MihomoConf  string `json:"-"`
 	XkeenJSON   string `json:"-"`
 	Installed   bool   `json:"installed"`
+	Autostart   bool   `json:"autostart"` // XKeen starts the proxy on boot
 }
 
 // Detector resolves the XKeen layout. Every field is an optional override from
@@ -62,6 +63,7 @@ const (
 var (
 	nameClientRe = regexp.MustCompile(`(?m)^\s*name_client=["']?([a-zA-Z0-9_-]+)["']?`)
 	modeProxyRe  = regexp.MustCompile(`(?m)^\s*mode_proxy=["']?([a-zA-Z0-9_-]+)["']?`)
+	startAutoRe  = regexp.MustCompile(`(?m)^\s*start_auto=["']?([a-z]+)["']?`)
 	versionRe    = regexp.MustCompile(`(?m)^\s*xkeen_current_version=["']?([^"'\s]+)["']?`)
 	buildRe      = regexp.MustCompile(`(?m)^\s*xkeen_build=["']?([^"'\s]+)["']?`)
 	ansiRe       = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -188,6 +190,9 @@ func (d *Detector) detect(initScript string) Runtime {
 	initBody, err := os.ReadFile(initScript)
 	r.Installed = err == nil
 	if err == nil {
+		if m := startAutoRe.FindSubmatch(initBody); m != nil {
+			r.Autostart = string(m[1]) == "on"
+		}
 		if m := nameClientRe.FindSubmatch(initBody); m != nil {
 			r.Core = string(m[1])
 		}

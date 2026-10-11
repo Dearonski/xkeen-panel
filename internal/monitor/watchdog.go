@@ -53,6 +53,7 @@ type Watchdog struct {
 	badNodes     map[string]time.Time // pool tags an exit check condemned, by expiry
 	lastRotation time.Time
 	poolStore    *xkeen.PoolStore
+	trigger      chan struct{}
 }
 
 func NewWatchdog(cfg *models.Config, sub *xkeen.SubscriptionManager, det *xkeen.Detector) *Watchdog {
@@ -65,6 +66,7 @@ func NewWatchdog(cfg *models.Config, sub *xkeen.SubscriptionManager, det *xkeen.
 		lastLatency:  -1,
 		blacklist:    make(map[string]time.Time),
 		badNodes:     make(map[string]time.Time),
+		trigger:      make(chan struct{}, 1),
 		health:       NewHealthChecker(cfg.HealthCheckURLs, cfg.HealthFailThreshold, cfg.HealthQuorum),
 	}
 }
@@ -127,13 +129,11 @@ func (w *Watchdog) Start(ctx context.Context) {
 			}
 			return
 		case <-ticker.C:
-			w.mu.RLock()
-			active := w.active
-			w.mu.RUnlock()
-
-			if active {
+			if w.IsActive() {
 				w.check()
 			}
+		case <-w.trigger:
+			w.check()
 		}
 	}
 }
@@ -874,6 +874,14 @@ func (w *Watchdog) SetActive(active bool) {
 	}
 
 	w.publishStatus()
+}
+
+// CheckNow asks for a check without waiting for the next tick, on the loop's own goroutine.
+func (w *Watchdog) CheckNow() {
+	select {
+	case w.trigger <- struct{}{}:
+	default:
+	}
 }
 
 // IsActive reports whether the watchdog is running.

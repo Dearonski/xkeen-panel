@@ -10,6 +10,7 @@ import {
     IconCpu,
     IconDownload,
     IconFingerprint,
+    IconWand,
 } from '@tabler/icons-react'
 import { Group, IconTile, PageTitle, Row, Switch } from '@/components/ios'
 import {
@@ -222,6 +223,11 @@ export function SettingsPage() {
                             }
                         />
                     )}
+                    <Row
+                        icon={icon('#5856d6', IconWand)}
+                        label='Мастер настройки'
+                        to='/welcome'
+                    />
                     <Row
                         icon={icon('#ff375f', IconActivity)}
                         label='Диагностика и журнал'

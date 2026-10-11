@@ -6,7 +6,8 @@ import {
     IconRefresh,
     IconWorld,
 } from '@tabler/icons-react'
-import { IconTile, Switch } from '@/components/ios'
+import { Group, IconTile, Row, Switch } from '@/components/ios'
+import { useSetupState } from '@/pages/welcomePage'
 import { Logo } from '@/components/logo'
 import {
     useDevices,
@@ -39,6 +40,7 @@ export function HomePage() {
     const update = useUpdate().data
     const logs = useLogs().data ?? []
     const { auto, pin } = useServerActions()
+    const setup = useSetupState().data
 
     const info = statusInfo(status)
     const current = servers.find(s => s.active)
@@ -69,6 +71,17 @@ export function HomePage() {
             <h1 className='hidden px-1 text-[34px] font-bold tracking-[0.37px] lg:block'>
                 Главная
             </h1>
+
+            {setup && !setup.complete && (
+                <Group>
+                    <Row
+                        label='Завершите настройку'
+                        hint='Осталось несколько шагов, чтобы VPN заработал'
+                        tone='tint'
+                        to='/welcome'
+                    />
+                </Group>
+            )}
 
             <div className='grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start'>
                 <div className='flex flex-col gap-4'>
