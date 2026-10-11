@@ -14,6 +14,8 @@ export type Server = {
 
 export type Status = {
     connected: boolean
+    internet: boolean
+    proxy_checked: boolean
     xray_running: boolean
     restarting: boolean
     current_server: string
@@ -126,4 +128,23 @@ export type UpdateState = {
     check_error?: string
     apply_error?: string
     failed_start?: string
+}
+
+export type Device = {
+    mac: string
+    name: string
+    ip?: string
+    active: boolean
+    registered: boolean
+    segment?: string
+    policy?: string
+    via?: 'host' | 'segment'
+    vpn: boolean
+}
+
+export type DevicesResponse = {
+    policy_found: boolean
+    new_devices_vpn: boolean
+    policy?: { name: string; description: string; mark: string }
+    devices: Device[]
 }

@@ -2,7 +2,14 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { SetupPage } from '@/pages/setupPage'
 import { LoginPage } from '@/pages/loginPage'
-import { DashboardPage } from '@/pages/dashboardPage'
+import { AppShell } from '@/components/appShell'
+import { HomePage } from '@/pages/homePage'
+import { ServersPage } from '@/pages/serversPage'
+import { DevicesPage } from '@/pages/devicesPage'
+import { SettingsPage } from '@/pages/settingsPage'
+import { UpdatePage } from '@/pages/updatePage'
+import { XkeenSettingsPage } from '@/pages/xkeenSettingsPage'
+import { DiagnosticsPage } from '@/pages/diagnosticsPage'
 import { ProtectedRoute } from '@/components/protectedRoute'
 import type { AuthStatus } from '@/types'
 
@@ -38,13 +45,29 @@ export function App() {
                     <>
                         <Route path='/login' element={<LoginPage />} />
                         <Route
-                            path='/'
                             element={
                                 <ProtectedRoute>
-                                    <DashboardPage />
+                                    <AppShell />
                                 </ProtectedRoute>
                             }
-                        />
+                        >
+                            <Route index element={<HomePage />} />
+                            <Route path='servers' element={<ServersPage />} />
+                            <Route path='devices' element={<DevicesPage />} />
+                            <Route path='settings' element={<SettingsPage />} />
+                            <Route
+                                path='settings/update'
+                                element={<UpdatePage />}
+                            />
+                            <Route
+                                path='settings/xkeen'
+                                element={<XkeenSettingsPage />}
+                            />
+                            <Route
+                                path='settings/diagnostics'
+                                element={<DiagnosticsPage />}
+                            />
+                        </Route>
                         <Route path='*' element={<Navigate to='/' />} />
                     </>
                 )}
