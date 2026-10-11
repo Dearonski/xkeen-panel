@@ -10,6 +10,7 @@ import (
 	"xkeen-panel/internal/api"
 	"xkeen-panel/internal/auth"
 	"xkeen-panel/internal/geoip"
+	"xkeen-panel/internal/keenetic"
 	"xkeen-panel/internal/models"
 	"xkeen-panel/internal/monitor"
 	"xkeen-panel/internal/sse"
@@ -62,6 +63,7 @@ func (s *Server) Handler() http.Handler {
 	authHandler := api.NewAuthHandler(s.userManager, rateLimiter, s.config)
 	webAuthnHandler := api.NewWebAuthnHandler(s.userManager, rateLimiter, s.config)
 	updateHandler := api.NewUpdateHandler(s.updater)
+	devicesHandler := api.NewDevicesHandler(s.detector, keenetic.DefaultAddr)
 	handlers := api.NewHandlers(s.config, s.subscription, s.watchdog, s.detector, s.pool, s.geoip)
 
 	// API routes
@@ -117,6 +119,9 @@ func (s *Server) Handler() http.Handler {
 			r.Put("/xkeen/lists/{name}", handlers.HandleUpdateList)
 
 			r.Post("/mihomo/sync", handlers.HandleMihomoSync)
+
+			r.Get("/devices", devicesHandler.HandleList)
+			r.Post("/devices/vpn", devicesHandler.HandleSetVPN)
 
 			r.Get("/pool", handlers.HandlePoolStatus)
 			r.Post("/pool/enable", handlers.HandlePoolEnable)
