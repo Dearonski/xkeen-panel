@@ -6,7 +6,15 @@ Supports both the jameszeroX fork (**XKeen 2.x**, `S05xkeen`) and the original
 Skrill0 layout (1.x, `S24xray`) — the layout, the active proxy core
 (Xray/Mihomo) and the proxying mode are detected at startup.
 
-![dashboard](https://img.shields.io/badge/stack-Go%20%2B%20React-blue)
+<p align="center">
+  <img src="docs/screenshots/desktop.png" alt="Home on a desktop" width="100%">
+</p>
+<p align="center">
+  <img src="docs/screenshots/home.png" alt="Home" width="24%">
+  <img src="docs/screenshots/servers.png" alt="Servers" width="24%">
+  <img src="docs/screenshots/devices.png" alt="Devices" width="24%">
+  <img src="docs/screenshots/settings.png" alt="Settings" width="24%">
+</p>
 
 ## Features
 
