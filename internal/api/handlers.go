@@ -204,10 +204,16 @@ func (h *Handlers) HandleGetServers(w http.ResponseWriter, r *http.Request) {
 			tags = xkeen.PoolTagsByNode(nodes)
 		}
 
+		// Duplicate entries of one node would all show as pooled and active otherwise
+		reps := xkeen.NodeRepresentatives(servers)
 		for i := range views {
 			key := xkeen.NodeKeyOfServer(views[i].Server)
+			if key == "" || reps[key] != views[i].ID {
+				views[i].Active = false
+				continue
+			}
 			views[i].PoolTag = tags[key]
-			views[i].Active = key != "" && key == pinned
+			views[i].Active = key == pinned
 		}
 	}
 

@@ -52,6 +52,7 @@ func SelectPoolServers(servers []models.Server, sel PoolSelection) []models.Serv
 		}
 		allowed = append(allowed, server)
 	}
+	allowed = uniqueEndpoints(allowed)
 
 	if len(allowed) == 0 {
 		return nil
@@ -67,6 +68,46 @@ func SelectPoolServers(servers []models.Server, sel PoolSelection) []models.Serv
 	}
 
 	return ranked
+}
+
+// Providers list one endpoint under several names (an expiry date, a news channel), which took several pool slots
+func uniqueEndpoints(servers []models.Server) []models.Server {
+	index := map[endpoint]int{}
+	unique := make([]models.Server, 0, len(servers))
+
+	for _, server := range servers {
+		ep, ok := endpointOfServer(server)
+		if !ok {
+			unique = append(unique, server)
+			continue
+		}
+		if i, seen := index[ep]; seen {
+			unique[i] = preferNamed(unique[i], server)
+			continue
+		}
+		index[ep] = len(unique)
+		unique = append(unique, server)
+	}
+
+	return unique
+}
+
+// The entry naming a country is the real server; the others are provider notices
+func preferNamed(current, candidate models.Server) models.Server {
+	if ServerCountry(current) == "" && ServerCountry(candidate) != "" {
+		return candidate
+	}
+	return current
+}
+
+func NodeRepresentatives(servers []models.Server) map[string]int {
+	reps := map[string]int{}
+	for _, server := range uniqueEndpoints(servers) {
+		if ep, ok := endpointOfServer(server); ok {
+			reps[ep.Key()] = server.ID
+		}
+	}
+	return reps
 }
 
 // incumbentsFirst moves servers already in the pool ahead of newcomers, keeping

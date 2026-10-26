@@ -37,7 +37,11 @@ func PoolNodes(outboundsPath, selector string, servers []models.Server) ([]PoolN
 		if err != nil {
 			continue
 		}
-		byEndpoint[[3]interface{}{params.Address, params.Port, params.UUID}] = &servers[i]
+		key := [3]interface{}{params.Address, params.Port, params.UUID}
+		if existing, seen := byEndpoint[key]; seen && preferNamed(*existing, servers[i]).ID == existing.ID {
+			continue
+		}
+		byEndpoint[key] = &servers[i]
 	}
 
 	nodes := make([]PoolNode, 0, len(raw))

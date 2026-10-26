@@ -159,3 +159,28 @@ func TestProbeIntervalScalesWithPoolSize(t *testing.T) {
 		}
 	}
 }
+
+func TestSelectPoolServersCollapsesDuplicateEndpoints(t *testing.T) {
+	notice := vlessAt("🔜📅 4 декабря 2026", "", "de.example", 443)
+	notice.ID = 1
+	real := vlessAt("Germany #1", "DE", "de.example", 443)
+	real.ID = 2
+	news := vlessAt("TG news", "", "de.example", 443)
+	news.ID = 3
+	other := vlessAt("NL-1", "NL", "nl.example", 443)
+	other.ID = 4
+
+	got := SelectPoolServers([]models.Server{notice, real, news, other}, PoolSelection{MaxNodes: 10})
+
+	if len(got) != 2 {
+		t.Fatalf("selected %d servers, want one per endpoint", len(got))
+	}
+	if got[0].Name != "Germany #1" {
+		t.Errorf("representative = %q, want the entry that names a country", got[0].Name)
+	}
+
+	reps := NodeRepresentatives([]models.Server{notice, real, news})
+	if reps[NodeKeyOfServer(real)] != real.ID {
+		t.Errorf("NodeRepresentatives picked %d, want %d", reps[NodeKeyOfServer(real)], real.ID)
+	}
+}
