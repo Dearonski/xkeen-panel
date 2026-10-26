@@ -4,6 +4,7 @@ import type {
     DevicesResponse,
     PoolStatus,
     Server,
+    SitesResponse,
     Status,
     SubscriptionInfo,
     UpdateState,
@@ -30,6 +31,13 @@ export function usePool() {
     return useQuery({
         queryKey: ['pool'],
         queryFn: () => api.get<PoolStatus>('/api/pool'),
+    })
+}
+
+export function useSites() {
+    return useQuery({
+        queryKey: ['sites'],
+        queryFn: () => api.get<SitesResponse>('/api/sites'),
     })
 }
 

@@ -56,6 +56,32 @@ export type PoolNode = {
     excluded_until?: string
 }
 
+export type SiteNode = {
+    tag: string
+    server_id: number
+    name: string
+    country?: string
+    state: 'ok' | 'fail' | 'unknown'
+    status?: number
+    error?: string
+    ms?: number
+}
+
+export type Site = {
+    id: number
+    domains: string[]
+    check_url: string
+    checked_at?: string
+    checking: boolean
+    passing: number
+    nodes: SiteNode[]
+}
+
+export type SitesResponse = {
+    unavailable: string
+    sites: Site[]
+}
+
 export type PoolSyncResult = {
     success: boolean
     changed: boolean

@@ -5,12 +5,28 @@ import {
     IconChevronRight,
     IconLink,
     IconPencil,
+    IconPlus,
     IconRefresh,
     IconSearch,
+    IconWorldWww,
 } from '@tabler/icons-react'
-import { CircleButton, Group, IconTile, PageTitle, Row } from '@/components/ios'
+import {
+    CircleButton,
+    Group,
+    IconTile,
+    PageTitle,
+    Row,
+    Segmented,
+    Switch,
+} from '@/components/ios'
 import { Sheet } from '@/components/sheet'
-import { useServers, useSubscription } from '@/hooks/usePanelData'
+import { AddSiteSheet, SiteSheet, siteSummary } from '@/components/siteSheets'
+import {
+    usePool,
+    useServers,
+    useSites,
+    useSubscription,
+} from '@/hooks/usePanelData'
 import { useServerActions } from '@/hooks/useServerActions'
 import { useStreamLatency } from '@/hooks/useStreamLatency'
 import {
@@ -30,15 +46,47 @@ const TILE = 'lg:rounded-card lg:bg-card lg:px-4'
 
 type CountryGroup = { code: string; list: Server[] }
 
+type Tab = 'pool' | 'all'
+
+const TAB_KEY = 'servers_tab'
+
+function savedTab(): Tab {
+    try {
+        return localStorage.getItem(TAB_KEY) === 'all' ? 'all' : 'pool'
+    } catch {
+        return 'pool'
+    }
+}
+
 export function ServersPage() {
     const servers = useServers().data ?? []
+    const pool = usePool().data
+    const sites = useSites().data
     const subscription = useSubscription().data
-    const { select, refreshSubscription, setSubscription, setCountry } =
-        useServerActions()
+    const {
+        select,
+        pin,
+        auto,
+        refreshSubscription,
+        setSubscription,
+        setCountry,
+    } = useServerActions()
     const { check, checking } = useStreamLatency()
     const [query, setQuery] = useState('')
     const [country, setCountryFilter] = useState('all')
     const [sheetOpen, setSheetOpen] = useState(false)
+    const [tab, setTabState] = useState<Tab>(savedTab)
+    const [addingSite, setAddingSite] = useState(false)
+    const [siteId, setSiteId] = useState<number | null>(null)
+
+    const isPool = pool?.mode === 'pool' && (pool.nodes?.length ?? 0) > 0
+    const view: Tab = isPool ? tab : 'all'
+    const setTab = (next: Tab) => {
+        setTabState(next)
+        try {
+            localStorage.setItem(TAB_KEY, next)
+        } catch {}
+    }
 
     const countries = useMemo(() => {
         const counts = new Map<string, number>()
@@ -50,17 +98,11 @@ export function ServersPage() {
     }, [servers])
 
     const groups = useMemo(() => {
-        const q = query.trim().toLowerCase()
         const byCountry = new Map<string, Server[]>()
         servers.forEach(s => {
             const c = serverCountry(s) || OTHER
             if (country !== 'all' && c !== country) return
-            if (
-                q &&
-                !s.name.toLowerCase().includes(q) &&
-                !countryName(c).toLowerCase().includes(q)
-            )
-                return
+            if (!matches(query, s.name, c)) return
             byCountry.set(c, [...(byCountry.get(c) ?? []), s])
         })
         const hasActive = (g: CountryGroup) =>
@@ -77,6 +119,28 @@ export function ServersPage() {
             )
     }, [servers, query, country])
 
+    const poolRows = useMemo(() => {
+        const byId = new Map(servers.map(s => [s.id, s]))
+        return (pool?.nodes ?? [])
+            .map(n => {
+                const server = byId.get(n.server_id)
+                return {
+                    node: n,
+                    country: server ? serverCountry(server) : n.country,
+                    latency: server?.latency_ms ?? n.latency_ms,
+                    current: n.tag === pool?.current_tag,
+                    excluded: !!n.excluded_until,
+                }
+            })
+            .filter(r => matches(query, r.node.name, r.country))
+            .sort(
+                (a, b) =>
+                    Number(b.current) - Number(a.current) ||
+                    Number(a.excluded) - Number(b.excluded) ||
+                    rank(a.latency) - rank(b.latency),
+            )
+    }, [pool, servers, query])
+
     const updated = timeAgo(subscription?.last_updated)
     const rowProps = (s: Server) => ({
         server: s,
@@ -86,13 +150,63 @@ export function ServersPage() {
             setCountry.mutate({ id: s.id, country: c }),
     })
 
+    const isAuto = isPool && !pool?.pin_manual
+    const pickNode = (tag: string, serverId: number) =>
+        serverId >= 0 ? select.mutate(serverId) : pin.mutate(tag)
+
+    const tiles = (
+        <div className='divide-y divide-white/10 rounded-card bg-card px-4 lg:grid lg:grid-cols-2 lg:gap-4 lg:divide-y-0 lg:bg-transparent lg:px-0'>
+            <div className={TILE}>
+                <Row
+                    icon={
+                        <IconTile color='#6366f1'>
+                            <IconLink className='size-[17px]' stroke={2.2} />
+                        </IconTile>
+                    }
+                    label={subscription?.url ? 'Подписка' : 'Добавить подписку'}
+                    tone={subscription?.url ? undefined : 'tint'}
+                    hint={
+                        subscription?.url
+                            ? `${hostOf(subscription.url)}${updated ? ` · обновлена ${updated} назад` : ''}`
+                            : 'Ссылка от VPN-провайдера'
+                    }
+                    onClick={() => setSheetOpen(true)}
+                    trailing={
+                        <IconChevronRight
+                            className='size-4 shrink-0 text-label-tertiary'
+                            stroke={2.6}
+                        />
+                    }
+                />
+            </div>
+            {subscription?.url && (
+                <div className={TILE}>
+                    <Row
+                        icon={
+                            <IconTile color='#30d158'>
+                                <IconActivityHeartbeat
+                                    className='size-[17px]'
+                                    stroke={2.2}
+                                />
+                            </IconTile>
+                        }
+                        label={checking ? 'Проверяю пинг…' : 'Проверить пинг'}
+                        hint='До самих серверов, без VPN'
+                        onClick={check}
+                        disabled={checking}
+                    />
+                </div>
+            )}
+        </div>
+    )
+
     return (
         <>
             <PageTitle
                 title='Серверы'
                 subtitle={
                     subscription?.url
-                        ? `${subscription.server_count} серверов${updated ? ` · подписка обновлена ${updated} назад` : ''}`
+                        ? `${subscription.server_count} серверов${isPool ? ` · ${pool?.nodes?.length} в пуле` : ''}${updated ? ` · обновлено ${updated} назад` : ''}`
                         : 'Добавьте ссылку на подписку'
                 }
                 action={
@@ -121,89 +235,189 @@ export function ServersPage() {
                 }
             />
 
-            <div className='divide-y divide-white/10 rounded-card bg-card px-4 lg:grid lg:grid-cols-2 lg:gap-4 lg:divide-y-0 lg:bg-transparent lg:px-0'>
-                <div className={TILE}>
-                    <Row
-                        icon={
-                            <IconTile color='#6366f1'>
-                                <IconLink
-                                    className='size-[17px]'
-                                    stroke={2.2}
-                                />
-                            </IconTile>
-                        }
-                        label={
-                            subscription?.url ? 'Подписка' : 'Добавить подписку'
-                        }
-                        tone={subscription?.url ? undefined : 'tint'}
-                        hint={
-                            subscription?.url
-                                ? `${hostOf(subscription.url)}${updated ? ` · обновлена ${updated} назад` : ''}`
-                                : 'Ссылка от VPN-провайдера'
-                        }
-                        onClick={() => setSheetOpen(true)}
-                        trailing={
-                            <IconChevronRight
-                                className='size-4 shrink-0 text-label-tertiary'
-                                stroke={2.6}
-                            />
-                        }
+            {isPool && (
+                <div className='lg:max-w-sm'>
+                    <Segmented
+                        label='Список серверов'
+                        value={view}
+                        onChange={setTab}
+                        options={[
+                            {
+                                value: 'pool',
+                                label: `Пул · ${pool?.nodes?.length ?? 0}`,
+                            },
+                            { value: 'all', label: `Все · ${servers.length}` },
+                        ]}
                     />
                 </div>
-                {subscription?.url && (
-                    <div className={TILE}>
-                        <Row
-                            icon={
-                                <IconTile color='#30d158'>
-                                    <IconActivityHeartbeat
-                                        className='size-[17px]'
-                                        stroke={2.2}
-                                    />
-                                </IconTile>
-                            }
-                            label={
-                                checking ? 'Проверяю пинг…' : 'Проверить пинг'
-                            }
-                            hint='До самих серверов, без VPN'
-                            onClick={check}
-                            disabled={checking}
-                        />
-                    </div>
-                )}
-            </div>
+            )}
 
-            {servers.length > 0 && (
-                <div className='flex flex-col gap-3'>
-                    <SearchField
-                        value={query}
-                        onChange={setQuery}
-                        className='lg:hidden'
-                    />
-                    <div
-                        role='group'
-                        aria-label='Страна'
-                        className='-mx-4 flex gap-2 overflow-x-auto px-4 [mask-image:linear-gradient(to_right,transparent,black_16px,black_calc(100%-40px),transparent)] [-webkit-mask-image:linear-gradient(to_right,transparent,black_16px,black_calc(100%-40px),transparent)] [scrollbar-width:none]'
+            {view === 'pool' && (
+                <div className='flex flex-col gap-4 lg:grid lg:grid-cols-2 lg:items-start'>
+                    <Group
+                        title='Пул'
+                        footer={
+                            isAuto
+                                ? 'Панель держит трафик на самом быстром сервере пула и сама переключается, если он перестал работать.'
+                                : 'Трафик закреплён за выбранным сервером. Включите автовыбор, чтобы панель снова выбирала сама.'
+                        }
                     >
-                        {['all', ...countries].map(c => (
-                            <button
-                                key={c}
-                                type='button'
-                                aria-pressed={c === country}
-                                onClick={() => setCountryFilter(c)}
-                                className={cn(
-                                    'min-h-9 shrink-0 cursor-pointer select-none rounded-full px-4 text-[15px] tracking-[-0.24px] transition-colors',
-                                    c === country
-                                        ? 'bg-white font-semibold text-black'
-                                        : 'border border-white/12 bg-white/6 font-medium hover:bg-white/10',
+                        <div className='flex min-h-[52px] items-center gap-3 py-2'>
+                            <span className='min-w-0 flex-1'>
+                                <span className='block text-[17px] tracking-[-0.43px]'>
+                                    Выбирать сервер сам
+                                </span>
+                                {pool?.pin_note && (
+                                    <span className='mt-0.5 block text-[13px] text-muted-foreground'>
+                                        {pool.pin_note}
+                                    </span>
                                 )}
+                            </span>
+                            <Switch
+                                checked={isAuto}
+                                onChange={next =>
+                                    next
+                                        ? auto.mutate()
+                                        : pool?.current_tag &&
+                                          pin.mutate(pool.current_tag)
+                                }
+                                label='Выбирать сервер сам'
+                                disabled={
+                                    auto.isPending ||
+                                    pin.isPending ||
+                                    !pool?.api_available
+                                }
+                            />
+                        </div>
+                        {poolRows.map(r => (
+                            <PoolRow
+                                key={r.node.tag}
+                                name={r.node.name}
+                                country={r.country}
+                                latency={r.latency}
+                                current={r.current}
+                                excludedUntil={r.node.excluded_until}
+                                busy={select.isPending || pin.isPending}
+                                onSelect={() =>
+                                    pickNode(r.node.tag, r.node.server_id)
+                                }
+                            />
+                        ))}
+                        {poolRows.length === 0 && (
+                            <p className='py-4 text-[15px] text-muted-foreground'>
+                                Ничего не нашлось
+                            </p>
+                        )}
+                    </Group>
+
+                    <div className='flex flex-col gap-4'>
+                        <Group
+                            title='Сайты'
+                            footer={
+                                sites?.unavailable ||
+                                'Если сайт открывается не через все серверы пула, добавьте его сюда: панель проверит каждый сервер и пустит сайт только через рабочие.'
+                            }
+                        >
+                            {sites?.sites.map(site => (
+                                <Row
+                                    key={site.id}
+                                    icon={
+                                        <IconTile color='#ff9f0a'>
+                                            <IconWorldWww
+                                                className='size-[17px]'
+                                                stroke={2.2}
+                                            />
+                                        </IconTile>
+                                    }
+                                    label={siteLabel(site.domains)}
+                                    hint={siteSummary(site)}
+                                    onClick={() => setSiteId(site.id)}
+                                    trailing={
+                                        <IconChevronRight
+                                            className='size-4 shrink-0 text-label-tertiary'
+                                            stroke={2.6}
+                                        />
+                                    }
+                                />
+                            ))}
+                            <Row
+                                icon={
+                                    <IconTile color='#0a84ff'>
+                                        <IconPlus
+                                            className='size-[17px]'
+                                            stroke={2.4}
+                                        />
+                                    </IconTile>
+                                }
+                                label='Добавить сайт'
+                                tone='tint'
+                                disabled={!!sites?.unavailable}
+                                onClick={() => setAddingSite(true)}
+                            />
+                        </Group>
+                        {tiles}
+                    </div>
+                </div>
+            )}
+
+            {view === 'all' && (
+                <>
+                    {tiles}
+
+                    {servers.length > 0 && (
+                        <div className='flex flex-col gap-3'>
+                            <SearchField
+                                value={query}
+                                onChange={setQuery}
+                                className='lg:hidden'
+                            />
+                            <div
+                                role='group'
+                                aria-label='Страна'
+                                className='-mx-4 flex gap-2 overflow-x-auto px-4 [mask-image:linear-gradient(to_right,transparent,black_16px,black_calc(100%-40px),transparent)] [-webkit-mask-image:linear-gradient(to_right,transparent,black_16px,black_calc(100%-40px),transparent)] [scrollbar-width:none]'
                             >
-                                {c === 'all'
-                                    ? 'Все'
-                                    : countryName(c) || 'Без страны'}
-                            </button>
+                                {['all', ...countries].map(c => (
+                                    <button
+                                        key={c}
+                                        type='button'
+                                        aria-pressed={c === country}
+                                        onClick={() => setCountryFilter(c)}
+                                        className={cn(
+                                            'min-h-9 shrink-0 cursor-pointer select-none rounded-full px-4 text-[15px] tracking-[-0.24px] transition-colors',
+                                            c === country
+                                                ? 'bg-white font-semibold text-black'
+                                                : 'border border-white/12 bg-white/6 font-medium hover:bg-white/10',
+                                        )}
+                                    >
+                                        {c === 'all'
+                                            ? 'Все'
+                                            : countryName(c) || 'Без страны'}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    <div className='flex flex-col gap-4 lg:block lg:columns-2 lg:gap-4'>
+                        {groups.map(g => (
+                            <Group
+                                key={g.code}
+                                title={groupTitle(g)}
+                                className='lg:mb-4 lg:break-inside-avoid'
+                            >
+                                {g.list.map(s => (
+                                    <ServerRow key={s.id} {...rowProps(s)} />
+                                ))}
+                            </Group>
                         ))}
                     </div>
-                </div>
+
+                    {servers.length > 0 && groups.length === 0 && (
+                        <p className='px-4 text-[15px] text-muted-foreground'>
+                            Ничего не нашлось
+                        </p>
+                    )}
+                </>
             )}
 
             <SubscriptionSheet
@@ -212,27 +426,104 @@ export function ServersPage() {
                 url={subscription?.url}
                 onSave={url => setSubscription.mutateAsync(url)}
             />
-
-            <div className='flex flex-col gap-4 lg:block lg:columns-2 lg:gap-4'>
-                {groups.map(g => (
-                    <Group
-                        key={g.code}
-                        title={groupTitle(g)}
-                        className='lg:mb-4 lg:break-inside-avoid'
-                    >
-                        {g.list.map(s => (
-                            <ServerRow key={s.id} {...rowProps(s)} />
-                        ))}
-                    </Group>
-                ))}
-            </div>
-
-            {servers.length > 0 && groups.length === 0 && (
-                <p className='px-4 text-[15px] text-muted-foreground'>
-                    Ничего не нашлось
-                </p>
-            )}
+            <AddSiteSheet
+                open={addingSite}
+                onClose={() => setAddingSite(false)}
+                onCreated={id => {
+                    setAddingSite(false)
+                    setSiteId(id)
+                }}
+            />
+            <SiteSheet
+                site={sites?.sites.find(s => s.id === siteId)}
+                onClose={() => setSiteId(null)}
+            />
         </>
+    )
+}
+
+function matches(query: string, name: string, country?: string) {
+    const q = query.trim().toLowerCase()
+    return (
+        !q ||
+        name.toLowerCase().includes(q) ||
+        countryName(country).toLowerCase().includes(q)
+    )
+}
+
+function rank(ms: number) {
+    return ms > 0 ? ms : Infinity
+}
+
+function siteLabel(domains: string[]) {
+    return domains.length > 1
+        ? `${domains[0]} и ещё ${domains.length - 1}`
+        : domains[0]
+}
+
+function PoolRow({
+    name,
+    country,
+    latency,
+    current,
+    excludedUntil,
+    busy,
+    onSelect,
+}: {
+    name: string
+    country?: string
+    latency: number
+    current: boolean
+    excludedUntil?: string
+    busy: boolean
+    onSelect: () => void
+}) {
+    const notes = [
+        countryName(country),
+        excludedUntil &&
+            `не отвечал, вернётся в ${new Date(excludedUntil).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })}`,
+    ].filter(Boolean)
+
+    return (
+        <button
+            type='button'
+            onClick={onSelect}
+            disabled={busy || current}
+            className='flex min-h-[52px] w-full cursor-pointer items-center gap-3 py-2 text-left disabled:cursor-default'
+        >
+            <span className='min-w-0 flex-1'>
+                <span
+                    className={cn(
+                        'block break-words text-[17px] tracking-[-0.43px]',
+                        excludedUntil && 'text-muted-foreground',
+                    )}
+                >
+                    {name}
+                </span>
+                {notes.length > 0 && (
+                    <span className='mt-0.5 block text-[13px] text-muted-foreground'>
+                        {notes.join(' · ')}
+                    </span>
+                )}
+            </span>
+            <span
+                className={cn(
+                    'shrink-0 text-right text-[15px] tabular-nums',
+                    toneText[latencyTone(latency)],
+                )}
+            >
+                {latency === 0 ? '' : latency < 0 ? '—' : `${latency} мс`}
+            </span>
+            <span className='flex w-6 justify-center'>
+                {current && (
+                    <IconCheck
+                        className='size-[18px] text-tint'
+                        stroke={2.8}
+                        aria-label='Сейчас используется'
+                    />
+                )}
+            </span>
+        </button>
     )
 }
 

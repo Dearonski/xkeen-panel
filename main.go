@@ -100,6 +100,15 @@ func main() {
 	watchdog.SetEventBus(eventBus)
 	watchdog.SetPoolStore(poolStore)
 
+	siteStore := xkeen.NewSiteStore(cfg.DataDir)
+	if err := siteStore.Load(); err != nil {
+		log.Printf("Предупреждение: не удалось загрузить сайты: %v", err)
+	}
+	sites := xkeen.NewSiteManager(siteStore, detector, subManager, cfg.OutboundsFile, cfg.XrayAPIAddr, 12*time.Second)
+	sites.Logf = watchdog.Log
+	sites.Notify = func() { eventBus.Publish(sse.Event{Type: "sites", Data: struct{}{}}) }
+	sites.Restart = func() { go watchdog.RestartCore() }
+
 	// Package xkeen logs to stdout by default, which the init script discards —
 	// send its pool and restart events to the panel log instead
 	xkeen.Log = watchdog.Log
@@ -168,6 +177,8 @@ func main() {
 		close(watchdogDone)
 	}()
 
+	go sites.Run(ctx)
+
 	// Periodic subscription refresh
 	go runSubscriptionRefresh(ctx, cfg, subManager, watchdog, detector, poolStore, geoMatcher, eventBus, refreshReset)
 
@@ -205,7 +216,7 @@ func main() {
 	}
 
 	// HTTP server
-	srv := server.New(cfg, userManager, subManager, watchdog, detector, poolStore, geoMatcher, eventBus, upd, panelSettings, frontendFS)
+	srv := server.New(cfg, userManager, subManager, watchdog, detector, poolStore, sites, geoMatcher, eventBus, upd, panelSettings, frontendFS)
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Port),
 		Handler: srv.Handler(),

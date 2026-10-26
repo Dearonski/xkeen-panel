@@ -28,6 +28,7 @@ type Server struct {
 	watchdog     *monitor.Watchdog
 	detector     *xkeen.Detector
 	pool         *xkeen.PoolStore
+	sites        *xkeen.SiteManager
 	geoip        *geoip.Matcher
 	eventBus     *sse.EventBus
 	updater      *updater.Updater
@@ -35,7 +36,7 @@ type Server struct {
 	frontendFS   fs.FS
 }
 
-func New(cfg *models.Config, um *auth.UserManager, sub *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, pool *xkeen.PoolStore, matcher *geoip.Matcher, bus *sse.EventBus, upd *updater.Updater, settings *api.PanelSettingsHandler, frontendFS fs.FS) *Server {
+func New(cfg *models.Config, um *auth.UserManager, sub *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, pool *xkeen.PoolStore, sites *xkeen.SiteManager, matcher *geoip.Matcher, bus *sse.EventBus, upd *updater.Updater, settings *api.PanelSettingsHandler, frontendFS fs.FS) *Server {
 	return &Server{
 		config:       cfg,
 		userManager:  um,
@@ -43,6 +44,7 @@ func New(cfg *models.Config, um *auth.UserManager, sub *xkeen.SubscriptionManage
 		watchdog:     wd,
 		detector:     det,
 		pool:         pool,
+		sites:        sites,
 		geoip:        matcher,
 		eventBus:     bus,
 		updater:      upd,
@@ -67,6 +69,7 @@ func (s *Server) Handler() http.Handler {
 	updateHandler := api.NewUpdateHandler(s.updater)
 	devicesHandler := api.NewDevicesHandler(s.detector, keenetic.DefaultAddr)
 	setupHandler := api.NewSetupHandler(s.detector, s.subscription, s.watchdog, devicesHandler)
+	sitesHandler := api.NewSitesHandler(s.sites)
 	handlers := api.NewHandlers(s.config, s.subscription, s.watchdog, s.detector, s.pool, s.geoip)
 
 	// API routes
@@ -140,6 +143,11 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/pool/sync", handlers.HandlePoolSync)
 			r.Post("/pool/pin", handlers.HandlePoolPin)
 			r.Post("/pool/auto", handlers.HandlePoolAuto)
+
+			r.Get("/sites", sitesHandler.HandleList)
+			r.Post("/sites", sitesHandler.HandleCreate)
+			r.Post("/sites/{id}/check", sitesHandler.HandleCheck)
+			r.Delete("/sites/{id}", sitesHandler.HandleDelete)
 
 			r.Get("/update", updateHandler.HandleStatus)
 			r.Post("/update/check", updateHandler.HandleCheck)

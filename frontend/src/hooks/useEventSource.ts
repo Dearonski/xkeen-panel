@@ -60,6 +60,11 @@ export function useEventSource() {
                 qc.invalidateQueries({ queryKey: ['pool'] })
                 qc.invalidateQueries({ queryKey: ['servers'] })
                 qc.invalidateQueries({ queryKey: ['status'] })
+                qc.invalidateQueries({ queryKey: ['sites'] })
+            })
+
+            es.addEventListener('sites', () => {
+                qc.invalidateQueries({ queryKey: ['sites'] })
             })
 
             es.onerror = () => {

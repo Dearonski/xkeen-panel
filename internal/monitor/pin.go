@@ -70,6 +70,11 @@ func (w *Watchdog) PinServer(server models.Server, manual bool, note string) (st
 	return tag, nil
 }
 
+// RestartCore applies a config change made outside the watchdog without losing the pin.
+func (w *Watchdog) RestartCore() {
+	w.restartAndRepin(w.detector.Runtime(), w.detector.Topology())
+}
+
 // restartAndRepin restarts the core and puts the stored pin back, since the
 // override lives only in the core's memory.
 func (w *Watchdog) restartAndRepin(rt xkeen.Runtime, top xkeen.Topology) {

@@ -47,7 +47,7 @@ func ReadTopology(rt Runtime) Topology {
 			if !ok || isServiceOutbound(ob) {
 				continue
 			}
-			if tag, _ := ob["tag"].(string); tag != "" {
+			if tag, _ := ob["tag"].(string); tag != "" && !IsSiteTag(tag) {
 				top.ProxyTags = append(top.ProxyTags, tag)
 			}
 		}
@@ -69,7 +69,7 @@ func ReadTopology(rt Runtime) Topology {
 			continue
 		}
 		tag, _ := balancer["tag"].(string)
-		if tag == "" {
+		if tag == "" || IsSiteTag(tag) {
 			continue
 		}
 
