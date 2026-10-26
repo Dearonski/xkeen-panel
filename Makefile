@@ -53,10 +53,10 @@ deploy-disk: build-arm64
 ROUTER_SSH ?= root@192.168.1.1
 
 # The config is not copied: on the router it holds webauthn_rp_id and other
-# install-specific settings that must not be overwritten
+# install-specific settings that must not be overwritten. scp -O: Entware has no sftp-server
 deploy-ssh: build-arm64
 	ssh $(ROUTER_SSH) '/opt/etc/init.d/S99xkeen-panel stop' || true
-	scp build/xkeen-panel-aarch64 $(ROUTER_SSH):/opt/sbin/xkeen-panel
+	scp -O build/xkeen-panel-aarch64 $(ROUTER_SSH):/opt/sbin/xkeen-panel
 	ssh $(ROUTER_SSH) 'chmod +x /opt/sbin/xkeen-panel && /opt/etc/init.d/S99xkeen-panel start'
 
 clean:
