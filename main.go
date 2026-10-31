@@ -108,6 +108,7 @@ func main() {
 	sites.Logf = watchdog.Log
 	sites.Notify = func() { eventBus.Publish(sse.Event{Type: "sites", Data: struct{}{}}) }
 	sites.Restart = func() { go watchdog.RestartCore() }
+	sites.ProbeAddr = watchdog.ProbeAddr
 
 	// Package xkeen logs to stdout by default, which the init script discards —
 	// send its pool and restart events to the panel log instead
@@ -178,6 +179,7 @@ func main() {
 	}()
 
 	go sites.Run(ctx)
+	go sites.RunLocks(ctx)
 
 	// Periodic subscription refresh
 	go runSubscriptionRefresh(ctx, cfg, subManager, watchdog, detector, poolStore, geoMatcher, eventBus, refreshReset)

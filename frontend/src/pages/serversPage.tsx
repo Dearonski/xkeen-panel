@@ -8,6 +8,7 @@ import {
     IconPlus,
     IconRefresh,
     IconSearch,
+    IconLock,
     IconWorldWww,
 } from '@tabler/icons-react'
 import {
@@ -322,12 +323,27 @@ export function ServersPage() {
                                 <Row
                                     key={site.id}
                                     icon={
-                                        <IconTile color='#ff9f0a'>
-                                            <IconWorldWww
-                                                className='size-[17px]'
-                                                stroke={2.2}
-                                            />
-                                        </IconTile>
+                                        site.lock ? (
+                                            <IconTile
+                                                color={
+                                                    site.lock.blocked
+                                                        ? '#ff453a'
+                                                        : '#30d158'
+                                                }
+                                            >
+                                                <IconLock
+                                                    className='size-[17px]'
+                                                    stroke={2.2}
+                                                />
+                                            </IconTile>
+                                        ) : (
+                                            <IconTile color='#ff9f0a'>
+                                                <IconWorldWww
+                                                    className='size-[17px]'
+                                                    stroke={2.2}
+                                                />
+                                            </IconTile>
+                                        )
                                     }
                                     label={siteLabel(site.domains)}
                                     hint={siteSummary(site)}

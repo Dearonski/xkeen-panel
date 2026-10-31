@@ -30,6 +30,7 @@ func (h *SitesHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 func (h *SitesHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Domains  string `json:"domains"`
+		IPs      string `json:"ips"`
 		CheckURL string `json:"check_url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -37,7 +38,7 @@ func (h *SitesHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	site, err := h.sites.Create([]string{req.Domains}, req.CheckURL)
+	site, err := h.sites.Create([]string{req.Domains}, []string{req.IPs}, req.CheckURL)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
@@ -69,6 +70,41 @@ func (h *SitesHandler) HandleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.sites.Delete(id); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+func (h *SitesHandler) HandleLock(w http.ResponseWriter, r *http.Request) {
+	id, ok := siteID(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Node string `json:"node"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Node == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "укажите ноду"})
+		return
+	}
+
+	if err := h.sites.Lock(id, req.Node); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+func (h *SitesHandler) HandleUnlock(w http.ResponseWriter, r *http.Request) {
+	id, ok := siteID(w, r)
+	if !ok {
+		return
+	}
+
+	if err := h.sites.Unlock(id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}

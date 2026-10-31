@@ -57,6 +57,7 @@ export type PoolNode = {
 }
 
 export type SiteNode = {
+    key: string
     tag: string
     server_id: number
     name: string
@@ -65,12 +66,29 @@ export type SiteNode = {
     status?: number
     error?: string
     ms?: number
+    exit_ip?: string
+    exit_country?: string
+}
+
+export type SiteLock = {
+    node: string
+    name: string
+    exit_ip: string
+    country: string
+    locked_at: string
+    blocked: boolean
+    reason?: string
+    blocked_at?: string
+    verified_at?: string
+    live: boolean
 }
 
 export type Site = {
     id: number
     domains: string[]
+    ips: string[]
     check_url: string
+    lock?: SiteLock
     checked_at?: string
     checking: boolean
     passing: number

@@ -24,31 +24,66 @@ const siteCheckUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Appl
 
 // A throwaway Xray keeps the check away from the running core and its live connections
 func CheckSite(rt Runtime, nodes []map[string]interface{}, checkURL string, timeout time.Duration) ([]SiteResult, error) {
+	traceHost := TraceHost(checkURL)
+	results := make([]SiteResult, len(nodes))
+
+	err := throughThrowaway(rt, nodes, func(i int, proxy *url.URL) {
+		result := openThrough(proxy, checkURL, timeout)
+		if ep, ok := endpointOfOutbound(nodes[i]); ok {
+			result.Node = ep.Key()
+		}
+		if traceHost != "" {
+			if exit, err := Trace(proxy, traceHost, timeout); err == nil {
+				result.ExitIP, result.ExitCountry = exit.IP, exit.Country
+			}
+		}
+		results[i] = result
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+func TraceThroughNode(rt Runtime, node map[string]interface{}, host string, timeout time.Duration) (Exit, error) {
+	var exit Exit
+	var traceErr error
+	err := throughThrowaway(rt, []map[string]interface{}{node}, func(_ int, proxy *url.URL) {
+		exit, traceErr = Trace(proxy, host, timeout)
+	})
+	if err != nil {
+		return Exit{}, err
+	}
+	return exit, traceErr
+}
+
+func throughThrowaway(rt Runtime, nodes []map[string]interface{}, each func(i int, proxy *url.URL)) error {
 	if len(nodes) == 0 {
-		return nil, fmt.Errorf("в пуле нет нод")
+		return fmt.Errorf("в пуле нет нод")
 	}
 	if _, err := os.Stat(rt.CoreBin); err != nil {
-		return nil, fmt.Errorf("бинарь xray не найден (%s)", rt.CoreBin)
+		return fmt.Errorf("бинарь xray не найден (%s)", rt.CoreBin)
 	}
 
 	ports, err := freePorts(len(nodes))
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	dir, err := os.MkdirTemp("", "xkeen-panel-sitecheck-*")
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer os.RemoveAll(dir)
 
 	configPath := filepath.Join(dir, "config.json")
 	data, err := json.Marshal(siteCheckConfig(nodes, ports))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if err := os.WriteFile(configPath, data, 0600); err != nil {
-		return nil, err
+		return err
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -59,7 +94,7 @@ func CheckSite(rt Runtime, nodes []map[string]interface{}, checkURL string, time
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
 		cancel()
-		return nil, fmt.Errorf("не удалось запустить проверочный xray: %w", err)
+		return fmt.Errorf("не удалось запустить проверочный xray: %w", err)
 	}
 	defer func() {
 		cancel()
@@ -67,33 +102,92 @@ func CheckSite(rt Runtime, nodes []map[string]interface{}, checkURL string, time
 	}()
 
 	if err := waitListening(ports[len(ports)-1], 10*time.Second); err != nil {
-		return nil, fmt.Errorf("проверочный xray не поднялся: %s", TailLines(stderr.String(), 2))
+		return fmt.Errorf("проверочный xray не поднялся: %s", TailLines(stderr.String(), 2))
 	}
 
-	results := make([]SiteResult, len(nodes))
 	sem := make(chan struct{}, siteCheckConcurrency)
 	var wg sync.WaitGroup
 
-	for i, node := range nodes {
-		key := ""
-		if ep, ok := endpointOfOutbound(node); ok {
-			key = ep.Key()
-		}
-
+	for i := range nodes {
 		wg.Add(1)
-		go func(i, port int, key string) {
+		go func(i int) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			result := openThrough(port, checkURL, timeout)
-			result.Node = key
-			results[i] = result
-		}(i, ports[i], key)
+			each(i, &url.URL{Scheme: "socks5", Host: fmt.Sprintf("127.0.0.1:%d", ports[i])})
+		}(i)
 	}
 	wg.Wait()
 
-	return results, nil
+	return nil
+}
+
+type Exit struct {
+	IP      string
+	Country string
+}
+
+func TraceHost(checkURL string) string {
+	u, err := url.Parse(checkURL)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
+}
+
+// The site's own Cloudflare edge reports the exit exactly as the site sees it
+func Trace(proxy *url.URL, host string, timeout time.Duration) (Exit, error) {
+	transport := &http.Transport{DisableKeepAlives: true}
+	if proxy != nil {
+		transport.Proxy = http.ProxyURL(proxy)
+	}
+	client := &http.Client{Timeout: timeout, Transport: transport}
+
+	req, err := http.NewRequest(http.MethodGet, "https://"+host+"/cdn-cgi/trace", nil)
+	if err != nil {
+		return Exit{}, err
+	}
+	req.Header.Set("User-Agent", siteCheckUserAgent)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return Exit{}, fmt.Errorf("%s", shortNetError(err))
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+	if err != nil {
+		return Exit{}, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return Exit{}, fmt.Errorf("%s/cdn-cgi/trace ответил %d", host, resp.StatusCode)
+	}
+
+	exit := parseTrace(string(body))
+	if exit.IP == "" {
+		return Exit{}, fmt.Errorf("%s не отдаёт trace Cloudflare", host)
+	}
+	return exit, nil
+}
+
+func parseTrace(body string) Exit {
+	var exit Exit
+	for line := range strings.SplitSeq(body, "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok {
+			continue
+		}
+		switch key {
+		case "ip":
+			if ip := net.ParseIP(value); ip != nil {
+				exit.IP = ip.String()
+			}
+		case "loc":
+			exit.Country = strings.ToUpper(value)
+		}
+	}
+	return exit
 }
 
 func siteCheckConfig(nodes []map[string]interface{}, ports []int) map[string]interface{} {
@@ -165,8 +259,7 @@ func waitListening(port int, limit time.Duration) error {
 	return fmt.Errorf("порт %d не открылся", port)
 }
 
-func openThrough(port int, checkURL string, timeout time.Duration) SiteResult {
-	proxy := &url.URL{Scheme: "socks5", Host: fmt.Sprintf("127.0.0.1:%d", port)}
+func openThrough(proxy *url.URL, checkURL string, timeout time.Duration) SiteResult {
 	client := &http.Client{
 		Timeout:   timeout,
 		Transport: &http.Transport{Proxy: http.ProxyURL(proxy), DisableKeepAlives: true},

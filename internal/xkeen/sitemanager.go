@@ -22,14 +22,16 @@ type SiteManager struct {
 	apiAddr       string
 	timeout       time.Duration
 
-	Restart func()
-	Notify  func()
-	Logf    func(format string, args ...interface{})
+	Restart   func()
+	Notify    func()
+	Logf      func(format string, args ...interface{})
+	ProbeAddr func() string
 
 	work      sync.Mutex
 	mu        sync.Mutex
 	checking  map[int]bool
 	attempted map[int]time.Time
+	verified  map[int]lockVerification
 }
 
 func NewSiteManager(store *SiteStore, det *Detector, sub *SubscriptionManager, outboundsPath, apiAddr string, timeout time.Duration) *SiteManager {
@@ -43,8 +45,10 @@ func NewSiteManager(store *SiteStore, det *Detector, sub *SubscriptionManager, o
 		Restart:       func() {},
 		Notify:        func() {},
 		Logf:          func(string, ...interface{}) {},
+		ProbeAddr:     func() string { return "" },
 		checking:      map[int]bool{},
 		attempted:     map[int]time.Time{},
+		verified:      map[int]lockVerification{},
 	}
 }
 
@@ -59,12 +63,16 @@ func (m *SiteManager) Unavailable() string {
 	return ""
 }
 
-func (m *SiteManager) Create(domainsInput []string, checkURL string) (Site, error) {
+func (m *SiteManager) Create(domainsInput, ipsInput []string, checkURL string) (Site, error) {
 	if reason := m.Unavailable(); reason != "" {
 		return Site{}, fmt.Errorf("%s", reason)
 	}
 
 	domains, err := ParseDomains(domainsInput)
+	if err != nil {
+		return Site{}, err
+	}
+	ips, err := ParseIPs(ipsInput)
 	if err != nil {
 		return Site{}, err
 	}
@@ -83,7 +91,7 @@ func (m *SiteManager) Create(domainsInput []string, checkURL string) (Site, erro
 		}
 	}
 
-	site, err := m.store.Add(Site{Domains: domains, CheckURL: checkURL})
+	site, err := m.store.Add(Site{Domains: domains, IPs: ips, CheckURL: checkURL})
 	if err != nil {
 		return Site{}, err
 	}
@@ -168,7 +176,9 @@ func (m *SiteManager) check(id int) {
 	}
 
 	passing := len(site.Passing())
-	if passing == 0 {
+	if site.Lock != nil {
+		m.Logf("[SITES] %s открывается через %d из %d нод, закрепление не тронуто", site.Domains[0], passing, len(results))
+	} else if passing == 0 {
 		m.Logf("[SITES] %s не открывается ни через одну ноду — оставляю весь пул", site.Domains[0])
 	} else {
 		m.Logf("[SITES] %s открывается через %d из %d нод", site.Domains[0], passing, len(results))
@@ -180,13 +190,19 @@ func (m *SiteManager) check(id int) {
 }
 
 func (m *SiteManager) applyLocked() error {
+	sites := m.store.List()
+	// Before the config: a lock's first restart is exactly the moment traffic would otherwise go direct
+	if err := m.syncKillSwitch(sites); err != nil {
+		m.Logf("[LOCK] Kill switch не применён: %v", err)
+	}
+
 	top := m.detector.Topology()
 	restart, err := ApplySites(m.detector.Runtime(), SiteApply{
 		OutboundsPath: m.outboundsPath,
 		Selector:      top.Selector(),
 		PoolBalancer:  top.BalancerTag,
 		APIAddr:       m.apiAddr,
-	}, m.store.List())
+	}, sites)
 	if err != nil {
 		return err
 	}
@@ -249,14 +265,31 @@ func stale(site Site, layout PoolLayout) bool {
 type SiteView struct {
 	ID        int            `json:"id"`
 	Domains   []string       `json:"domains"`
+	IPs       []string       `json:"ips"`
 	CheckURL  string         `json:"check_url"`
+	Lock      *SiteLockView  `json:"lock,omitempty"`
 	CheckedAt *time.Time     `json:"checked_at,omitempty"`
 	Checking  bool           `json:"checking"`
 	Passing   int            `json:"passing"`
 	Nodes     []SiteNodeView `json:"nodes"`
 }
 
+type SiteLockView struct {
+	Node       string     `json:"node"`
+	Name       string     `json:"name"`
+	ExitIP     string     `json:"exit_ip"`
+	Country    string     `json:"country"`
+	LockedAt   time.Time  `json:"locked_at"`
+	Blocked    bool       `json:"blocked"`
+	Reason     string     `json:"reason,omitempty"`
+	BlockedAt  *time.Time `json:"blocked_at,omitempty"`
+	VerifiedAt *time.Time `json:"verified_at,omitempty"`
+	// false: only the node was checked, not the live core's routing
+	Live bool `json:"live"`
+}
+
 type SiteNodeView struct {
+	Key      string `json:"key"`
 	Tag      string `json:"tag"`
 	ServerID int    `json:"server_id"`
 	Name     string `json:"name"`
@@ -265,6 +298,9 @@ type SiteNodeView struct {
 	Status   int    `json:"status,omitempty"`
 	Error    string `json:"error,omitempty"`
 	Ms       int    `json:"ms,omitempty"`
+	ExitIP   string `json:"exit_ip,omitempty"`
+	// The country the site sees, which can differ from the node's own
+	ExitCountry string `json:"exit_country,omitempty"`
 }
 
 // Views joins stored results with the pool as it is now; nodes added since the last check show as unknown.
@@ -285,9 +321,28 @@ func (m *SiteManager) Views() []SiteView {
 		view := SiteView{
 			ID:       site.ID,
 			Domains:  site.Domains,
+			IPs:      site.IPs,
 			CheckURL: site.CheckURL,
 			Checking: m.Checking(site.ID),
 			Nodes:    []SiteNodeView{},
+		}
+		if view.IPs == nil {
+			view.IPs = []string{}
+		}
+		if l := site.Lock; l != nil {
+			lv := &SiteLockView{
+				Node: l.Node, Name: l.Name, ExitIP: l.ExitIP, Country: l.Country,
+				LockedAt: l.LockedAt, Blocked: l.Blocked, Reason: l.Reason,
+			}
+			if !l.BlockedAt.IsZero() {
+				at := l.BlockedAt
+				lv.BlockedAt = &at
+			}
+			if v, ok := m.verification(site.ID); ok {
+				at := v.at
+				lv.VerifiedAt, lv.Live = &at, v.live
+			}
+			view.Lock = lv
 		}
 		if !site.CheckedAt.IsZero() {
 			at := site.CheckedAt
@@ -295,12 +350,14 @@ func (m *SiteManager) Views() []SiteView {
 		}
 
 		for _, node := range nodes {
-			nv := SiteNodeView{Tag: node.Tag, ServerID: -1, Name: node.Address, State: "unknown"}
+			key := endpoint{Address: node.Address, Port: node.Port, UUID: node.UUID}.Key()
+			nv := SiteNodeView{Key: key, Tag: node.Tag, ServerID: -1, Name: node.Address, State: "unknown"}
 			if s := node.Server; s != nil {
 				nv.ServerID, nv.Name, nv.Country = s.ID, s.Name, ServerCountry(*s)
 			}
-			if r, ok := byNode[endpoint{Address: node.Address, Port: node.Port, UUID: node.UUID}.Key()]; ok {
+			if r, ok := byNode[key]; ok {
 				nv.State, nv.Status, nv.Error, nv.Ms = "fail", r.Status, r.Error, r.Ms
+				nv.ExitIP, nv.ExitCountry = r.ExitIP, r.ExitCountry
 				if r.OK {
 					nv.State = "ok"
 					view.Passing++

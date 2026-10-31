@@ -42,6 +42,12 @@ func (w *Watchdog) SetProbeAddr(addr string) {
 	w.mu.Unlock()
 }
 
+func (w *Watchdog) ProbeAddr() string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.probeAddr
+}
+
 // proxyURL is how checks reach the proxy: the panel's own socks inbound on Xray,
 // the mixed/socks port on Mihomo. Nil when neither is available.
 func (w *Watchdog) proxyURL() *url.URL {

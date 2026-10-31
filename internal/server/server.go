@@ -148,6 +148,8 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/sites", sitesHandler.HandleCreate)
 			r.Post("/sites/{id}/check", sitesHandler.HandleCheck)
 			r.Delete("/sites/{id}", sitesHandler.HandleDelete)
+			r.Post("/sites/{id}/lock", sitesHandler.HandleLock)
+			r.Delete("/sites/{id}/lock", sitesHandler.HandleUnlock)
 
 			r.Get("/update", updateHandler.HandleStatus)
 			r.Post("/update/check", updateHandler.HandleCheck)

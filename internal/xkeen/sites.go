@@ -3,6 +3,7 @@ package xkeen
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -17,17 +18,34 @@ import (
 type Site struct {
 	ID        int          `json:"id"`
 	Domains   []string     `json:"domains"`
+	IPs       []string     `json:"ips,omitempty"`
 	CheckURL  string       `json:"check_url"`
 	Results   []SiteResult `json:"results,omitempty"`
 	CheckedAt time.Time    `json:"checked_at"`
+	Lock      *SiteLock    `json:"lock,omitempty"`
 }
 
 type SiteResult struct {
-	Node   string `json:"node"`
-	OK     bool   `json:"ok"`
-	Status int    `json:"status,omitempty"`
-	Error  string `json:"error,omitempty"`
-	Ms     int    `json:"ms,omitempty"`
+	Node        string `json:"node"`
+	OK          bool   `json:"ok"`
+	Status      int    `json:"status,omitempty"`
+	Error       string `json:"error,omitempty"`
+	Ms          int    `json:"ms,omitempty"`
+	ExitIP      string `json:"exit_ip,omitempty"`
+	ExitCountry string `json:"exit_country,omitempty"`
+}
+
+type SiteLock struct {
+	Node string `json:"node"`
+	Name string `json:"name"`
+	// A snapshot, so a pool refresh can neither move the lock nor drop it
+	Outbound  map[string]interface{} `json:"outbound"`
+	ExitIP    string                 `json:"exit_ip"`
+	Country   string                 `json:"country"`
+	LockedAt  time.Time              `json:"locked_at"`
+	Blocked   bool                   `json:"blocked,omitempty"`
+	Reason    string                 `json:"reason,omitempty"`
+	BlockedAt time.Time              `json:"blocked_at,omitzero"`
 }
 
 func (s Site) Passing() map[string]bool {
@@ -53,13 +71,21 @@ const sitesConfigFile = "04_sites.json"
 // observatory matches selectors by substring, so this one covers every site node
 const siteObservatorySelector = "site"
 
-var siteTagRe = regexp.MustCompile(`^site\d+(-\d+)?$`)
+var siteTagRe = regexp.MustCompile(`^site\d+(-(\d+|pin))?$`)
+
+var sitePinTagRe = regexp.MustCompile(`^site\d+-pin$`)
 
 func IsSiteTag(tag string) bool {
 	return siteTagRe.MatchString(tag)
 }
 
+func isSitePinTag(tag string) bool {
+	return sitePinTagRe.MatchString(tag)
+}
+
 func siteBalancerTag(id int) string { return fmt.Sprintf("site%d", id) }
+
+func sitePinTag(id int) string { return fmt.Sprintf("site%d-pin", id) }
 
 // The trailing dash keeps site1 from selecting the nodes of site10
 func siteSelector(id int) string { return fmt.Sprintf("site%d-", id) }
@@ -106,6 +132,35 @@ func ParseDomains(input []string) ([]string, error) {
 	}
 
 	return domains, nil
+}
+
+func ParseIPs(input []string) ([]string, error) {
+	seen := map[string]bool{}
+	var ips []string
+
+	for _, raw := range input {
+		for _, field := range strings.FieldsFunc(raw, func(r rune) bool {
+			return r == ',' || r == ';' || r == ' ' || r == '\n' || r == '\t'
+		}) {
+			v := strings.TrimSpace(field)
+			if v == "" {
+				continue
+			}
+			if _, network, err := net.ParseCIDR(v); err == nil {
+				v = network.String()
+			} else if ip := net.ParseIP(v); ip != nil {
+				v = ip.String()
+			} else {
+				return nil, fmt.Errorf("%q не похоже на IP или подсеть", field)
+			}
+			if !seen[v] {
+				seen[v] = true
+				ips = append(ips, v)
+			}
+		}
+	}
+
+	return ips, nil
 }
 
 func NormalizeCheckURL(raw string, domains []string) (string, error) {
@@ -224,11 +279,20 @@ func (s *SiteStore) saveLocked() error {
 	return writeFileAtomic(s.path, data, 0600)
 }
 
-// A site with no passing node gets the whole pool, so a failed check never cuts it off
+// A site with no passing node gets the whole pool, so a failed check never cuts it off; a blocked lock gets nothing, and Xray drops traffic to a missing tag
 func siteOutbounds(sites []Site, pool []map[string]interface{}) []interface{} {
 	var outbounds []interface{}
 
 	for _, site := range sites {
+		if site.Lock != nil {
+			if !site.Lock.Blocked && site.Lock.Outbound != nil {
+				copied := deepCopy(site.Lock.Outbound)
+				copied["tag"] = sitePinTag(site.ID)
+				outbounds = append(outbounds, copied)
+			}
+			continue
+		}
+
 		passing := site.Passing()
 
 		var chosen []map[string]interface{}
@@ -258,11 +322,69 @@ func deepCopy(m map[string]interface{}) map[string]interface{} {
 	return out
 }
 
+func siteRules(site Site, inboundTags []interface{}) []interface{} {
+	target, tag := "balancerTag", siteBalancerTag(site.ID)
+	if site.Lock != nil {
+		target, tag = "outboundTag", sitePinTag(site.ID)
+	}
+
+	domains := make([]interface{}, len(site.Domains))
+	for i, d := range site.Domains {
+		domains[i] = "domain:" + d
+	}
+
+	// domain and ip in one rule must both match, so they go in separate rules
+	matchers := []map[string]interface{}{{"domain": domains}}
+	if len(site.IPs) > 0 {
+		ips := make([]interface{}, len(site.IPs))
+		for i, ip := range site.IPs {
+			ips[i] = ip
+		}
+		matchers = append(matchers, map[string]interface{}{"ip": ips})
+	}
+
+	var rules []interface{}
+	for _, m := range matchers {
+		rule := map[string]interface{}{"type": "field", target: tag}
+		for k, v := range m {
+			rule[k] = v
+		}
+		if len(inboundTags) > 0 {
+			rule["inboundTag"] = inboundTags
+		}
+		rules = append(rules, rule)
+	}
+	return rules
+}
+
+// Lets the monitor check a lock along the exact path client traffic takes
+func lockProbeRule(site Site) map[string]interface{} {
+	domains := make([]interface{}, len(site.Domains))
+	for i, d := range site.Domains {
+		domains[i] = "domain:" + d
+	}
+	return map[string]interface{}{
+		"type":        "field",
+		"inboundTag":  []interface{}{ProbeInboundTag},
+		"domain":      domains,
+		"outboundTag": sitePinTag(site.ID),
+	}
+}
+
+func isSiteRule(rule map[string]interface{}) bool {
+	if tag, _ := rule["balancerTag"].(string); IsSiteTag(tag) {
+		return true
+	}
+	tag, _ := rule["outboundTag"].(string)
+	return IsSiteTag(tag)
+}
+
 // Site domains are dropped from hand-written pool rules, which is how a manual rule turns into a site
 func applySiteRouting(doc *routingDoc, sites []Site, poolBalancer string) bool {
 	before := deepCopy(doc.config)
 	routing := doc.routing
 
+	balanced := 0
 	var balancers []interface{}
 	for _, raw := range asSlice(routing["balancers"]) {
 		if b, ok := raw.(map[string]interface{}); ok {
@@ -273,6 +395,10 @@ func applySiteRouting(doc *routingDoc, sites []Site, poolBalancer string) bool {
 		balancers = append(balancers, raw)
 	}
 	for _, site := range sites {
+		if site.Lock != nil {
+			continue
+		}
+		balanced++
 		balancers = append(balancers, balancerBlock(siteBalancerTag(site.ID), siteSelector(site.ID)))
 	}
 	if len(balancers) > 0 {
@@ -290,7 +416,7 @@ func applySiteRouting(doc *routingDoc, sites []Site, poolBalancer string) bool {
 
 	inboundTags := catchAllInbounds(routing, poolBalancer)
 
-	var head, tail []interface{}
+	var lockProbes, probes, tail []interface{}
 	leading := true
 	for _, raw := range asSlice(routing["rules"]) {
 		rule, ok := raw.(map[string]interface{})
@@ -299,11 +425,11 @@ func applySiteRouting(doc *routingDoc, sites []Site, poolBalancer string) bool {
 			leading = false
 			continue
 		}
-		if tag, _ := rule["balancerTag"].(string); IsSiteTag(tag) {
+		if isSiteRule(rule) {
 			continue
 		}
 		if leading && isProbeRule(rule) {
-			head = append(head, raw)
+			probes = append(probes, raw)
 			continue
 		}
 		leading = false
@@ -323,22 +449,17 @@ func applySiteRouting(doc *routingDoc, sites []Site, poolBalancer string) bool {
 		tail = append(tail, raw)
 	}
 
+	var own []interface{}
 	for _, site := range sites {
-		domains := make([]interface{}, len(site.Domains))
-		for i, d := range site.Domains {
-			domains[i] = "domain:" + d
+		if site.Lock != nil {
+			lockProbes = append(lockProbes, lockProbeRule(site))
 		}
-		rule := map[string]interface{}{
-			"type":        "field",
-			"domain":      domains,
-			"balancerTag": siteBalancerTag(site.ID),
-		}
-		if len(inboundTags) > 0 {
-			rule["inboundTag"] = inboundTags
-		}
-		head = append(head, rule)
+		own = append(own, siteRules(site, inboundTags)...)
 	}
-	routing["rules"] = append(head, tail...)
+
+	rules := append(lockProbes, probes...)
+	rules = append(rules, own...)
+	routing["rules"] = append(rules, tail...)
 	doc.config["routing"] = routing
 
 	if observatory, ok := doc.config["observatory"].(map[string]interface{}); ok {
@@ -348,7 +469,7 @@ func applySiteRouting(doc *routingDoc, sites []Site, poolBalancer string) bool {
 				selectors = append(selectors, s)
 			}
 		}
-		if len(sites) > 0 {
+		if balanced > 0 {
 			selectors = append(selectors, siteObservatorySelector)
 		}
 		observatory["subjectSelector"] = selectors
@@ -408,9 +529,12 @@ func ApplySites(rt Runtime, opts SiteApply, sites []Site) (restart bool, err err
 	sitesPath := filepath.Join(rt.XrayConfDir, sitesConfigFile)
 	var current map[string]interface{}
 	existed := ReadJSONC(sitesPath, &current) == nil
-	oldTags := PoolNodeTags(asSlice(current["outbounds"]))
+	oldOutbounds := asSlice(current["outbounds"])
 
 	outbounds := siteOutbounds(sites, pool)
+	if outbounds == nil {
+		outbounds = []interface{}{}
+	}
 	sitesDoc := map[string]interface{}{"outbounds": outbounds}
 	outboundsChanged := existed != (len(sites) > 0) || (existed && !sameJSON(current, sitesDoc))
 
@@ -428,7 +552,7 @@ func ApplySites(rt Runtime, opts SiteApply, sites []Site) (restart bool, err err
 		if err := WriteOutboundsConfig(sitesPath, sitesDoc); err != nil {
 			return false, err
 		}
-		if err := swapOutboundsLive(rt, opts.APIAddr, oldTags, outbounds); err == nil {
+		if err := swapOutboundsLive(rt, opts.APIAddr, oldOutbounds, outbounds); err == nil {
 			return false, nil
 		} else {
 			Log("[SITES] Горячее обновление недоступно (%v) — нужен перезапуск ядра", err)
@@ -457,10 +581,46 @@ func ApplySites(rt Runtime, opts SiteApply, sites []Site) (restart bool, err err
 	return true, nil
 }
 
-func swapOutboundsLive(rt Runtime, apiAddr string, oldTags []string, outbounds []interface{}) error {
-	sort.Strings(oldTags)
-	if err := RemoveOutbounds(rt, apiAddr, oldTags); err != nil {
+// Only changed tags are touched, so a lock's pin is never pulled while another site's nodes move
+func swapOutboundsLive(rt Runtime, apiAddr string, oldOutbounds, newOutbounds []interface{}) error {
+	remove, add := outboundDiff(oldOutbounds, newOutbounds)
+	if err := RemoveOutbounds(rt, apiAddr, remove); err != nil {
 		return err
 	}
-	return AddOutbounds(rt, apiAddr, outbounds)
+	return AddOutbounds(rt, apiAddr, add)
+}
+
+func outboundDiff(oldOutbounds, newOutbounds []interface{}) (remove []string, add []interface{}) {
+	byTag := func(list []interface{}) map[string]map[string]interface{} {
+		m := make(map[string]map[string]interface{}, len(list))
+		for _, raw := range list {
+			if ob, ok := raw.(map[string]interface{}); ok {
+				if tag, _ := ob["tag"].(string); tag != "" {
+					m[tag] = ob
+				}
+			}
+		}
+		return m
+	}
+	before, after := byTag(oldOutbounds), byTag(newOutbounds)
+
+	for tag, ob := range before {
+		if next, ok := after[tag]; !ok || !sameJSON(ob, next) {
+			remove = append(remove, tag)
+		}
+	}
+	sort.Strings(remove)
+
+	for _, raw := range newOutbounds {
+		ob, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		tag, _ := ob["tag"].(string)
+		if prev, ok := before[tag]; !ok || !sameJSON(prev, ob) {
+			add = append(add, raw)
+		}
+	}
+
+	return remove, add
 }

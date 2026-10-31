@@ -200,7 +200,7 @@ func TestApplySitesRemovesLastSite(t *testing.T) {
 }
 
 func TestSiteTags(t *testing.T) {
-	for tag, want := range map[string]bool{"site1": true, "site12-3": true, "sub-1": false, "website": false, "site": false} {
+	for tag, want := range map[string]bool{"site1": true, "site12-3": true, "site3-pin": true, "site3-pinx": false, "sub-1": false, "website": false, "site": false} {
 		if IsSiteTag(tag) != want {
 			t.Errorf("IsSiteTag(%q) = %v", tag, !want)
 		}

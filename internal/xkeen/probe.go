@@ -98,8 +98,7 @@ func ruleTargets(key, target string) func(map[string]interface{}) bool {
 	}
 }
 
-// setProbeRule puts the probe rule first, where nothing else can claim its
-// traffic. Returns true when the rules changed.
+// Lock probes go ahead of the probe rule, or it would claim their domains first
 func setProbeRule(routing map[string]interface{}, key, target string) bool {
 	want := map[string]interface{}{
 		"type":       "field",
@@ -108,20 +107,26 @@ func setProbeRule(routing map[string]interface{}, key, target string) bool {
 	}
 
 	rules := asSlice(routing["rules"])
-	kept := make([]interface{}, 0, len(rules)+1)
-	kept = append(kept, want)
-
-	for i, raw := range rules {
+	var lockProbes, rest []interface{}
+	for _, raw := range rules {
 		rule, ok := raw.(map[string]interface{})
-		if ok && isProbeRule(rule) {
-			if i == 0 && sameJSON(rule, want) {
-				return false
-			}
-			continue
+		switch {
+		case ok && isLockProbeRule(rule):
+			lockProbes = append(lockProbes, raw)
+		case ok && isProbeRule(rule):
+		default:
+			rest = append(rest, raw)
 		}
-		kept = append(kept, raw)
 	}
 
+	kept := make([]interface{}, 0, len(rules)+1)
+	kept = append(kept, lockProbes...)
+	kept = append(kept, want)
+	kept = append(kept, rest...)
+
+	if sameJSON(map[string]interface{}{"r": kept}, map[string]interface{}{"r": rules}) {
+		return false
+	}
 	routing["rules"] = kept
 	return true
 }
@@ -129,6 +134,11 @@ func setProbeRule(routing map[string]interface{}, key, target string) bool {
 func isProbeRule(rule map[string]interface{}) bool {
 	tags := stringsOf(rule["inboundTag"])
 	return len(tags) == 1 && tags[0] == ProbeInboundTag
+}
+
+func isLockProbeRule(rule map[string]interface{}) bool {
+	tag, _ := rule["outboundTag"].(string)
+	return isProbeRule(rule) && isSitePinTag(tag)
 }
 
 // sameJSON compares parsed JSON with freshly built maps, whose numbers are ints

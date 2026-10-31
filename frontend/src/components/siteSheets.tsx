@@ -1,13 +1,22 @@
 import { useEffect, useState } from 'react'
-import { IconCheck, IconQuestionMark, IconX } from '@tabler/icons-react'
+import {
+    IconCheck,
+    IconLock,
+    IconQuestionMark,
+    IconX,
+} from '@tabler/icons-react'
 import { Group, Row } from '@/components/ios'
 import { Sheet } from '@/components/sheet'
 import { useSiteActions } from '@/hooks/useSiteActions'
 import { countryName, timeAgo } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import type { Site, SiteNode } from '@/types'
+import type { Site, SiteLock, SiteNode } from '@/types'
 
 export function siteSummary(site: Site) {
+    const lock = site.lock
+    if (lock?.blocked)
+        return `Заблокирован: ${lock.reason || 'выход не подтверждён'}`
+    if (lock) return `Только ${lock.exit_ip} · ${countryLabel(lock.country)}`
     if (site.checking) return 'Проверяю серверы…'
     if (!site.checked_at) return 'Ещё не проверен'
     const ago = timeAgo(site.checked_at)
@@ -27,12 +36,14 @@ export function AddSiteSheet({
 }) {
     const { create } = useSiteActions()
     const [domains, setDomains] = useState('')
+    const [ips, setIPs] = useState('')
     const [checkURL, setCheckURL] = useState('')
     const [error, setError] = useState('')
 
     useEffect(() => {
         if (!open) return
         setDomains('')
+        setIPs('')
         setCheckURL('')
         setError('')
     }, [open])
@@ -43,6 +54,7 @@ export function AddSiteSheet({
         try {
             const res = await create.mutateAsync({
                 domains,
+                ips,
                 check_url: checkURL,
             })
             onCreated(res.id)
@@ -90,6 +102,26 @@ export function AddSiteSheet({
             </Group>
 
             <Group
+                title='IP-адреса'
+                footer='Необязательно. Подсети через пробел — ловят соединения, в которых домен не распознан.'
+            >
+                <label htmlFor='site-ips' className='sr-only'>
+                    IP-адреса
+                </label>
+                <textarea
+                    id='site-ips'
+                    value={ips}
+                    onChange={e => setIPs(e.target.value)}
+                    placeholder='203.0.113.0/24'
+                    rows={1}
+                    autoCapitalize='none'
+                    autoCorrect='off'
+                    spellCheck={false}
+                    className='block w-full resize-none bg-transparent py-3 text-[17px] tracking-[-0.43px] outline-none placeholder:text-label-tertiary'
+                />
+            </Group>
+
+            <Group
                 title='Адрес проверки'
                 footer='Страница, которая не открывается через плохие серверы, — например, страница входа. Панель откроет её через каждый сервер пула и пустит сайт только через те, где она ответила без ошибки. Пусто — главная страница первого домена.'
             >
@@ -127,14 +159,45 @@ export function SiteSheet({
     site?: Site
     onClose: () => void
 }) {
-    const { check, remove } = useSiteActions()
+    const { check, remove, lock } = useSiteActions()
     const [confirming, setConfirming] = useState(false)
     const [error, setError] = useState('')
+    const [pending, setPending] = useState<string | null>(null)
+    const [lockError, setLockError] = useState('')
 
     useEffect(() => {
         setConfirming(false)
         setError('')
+        setPending(null)
+        setLockError('')
     }, [site?.id])
+
+    const pick = async (node: string) => {
+        if (!site || lock.isPending) return
+        setLockError('')
+        if (pending !== node) {
+            setPending(node)
+            return
+        }
+        try {
+            await lock.mutateAsync({ id: site.id, node })
+            setPending(null)
+        } catch (e) {
+            setLockError(
+                e instanceof Error ? e.message : 'Не удалось закрепить',
+            )
+        }
+    }
+
+    const nodesFooter = !site ? undefined : lockError ? (
+        <span className='text-destructive'>{lockError}</span>
+    ) : pending ? (
+        `Панель ещё раз узнает выходной IP через этот сервер и пустит сайт только через него.${site.lock ? '' : ' Ядро перезапустится.'}`
+    ) : site.lock ? (
+        'Нажмите на другой сервер, чтобы перенести закрепление.'
+    ) : site.nodes.some(n => n.state === 'ok' && n.exit_ip) ? (
+        `Нажмите на сервер, чтобы сайт ходил только через него. Если его IP или страна изменятся, панель заблокирует сайт, а не переключит на другой сервер.${site.ips.length === 0 ? ' Без IP-адресов сайт не защищён, пока перезапускается ядро.' : ''}`
+    ) : undefined
 
     const del = async () => {
         if (!site) return
@@ -156,7 +219,7 @@ export function SiteSheet({
                 <>
                     <Group
                         footer={
-                            site.passing === 0 && site.checked_at
+                            !site.lock && site.passing === 0 && site.checked_at
                                 ? 'Пока ни один сервер не прошёл проверку, сайт идёт через весь пул, как раньше.'
                                 : `Проверяется ${site.check_url}. Панель перепроверяет сайт, когда меняется пул, и раз в 12 часов.`
                         }
@@ -175,10 +238,29 @@ export function SiteSheet({
                         />
                     </Group>
 
+                    {site.lock && <LockGroup site={site} />}
+
                     {site.nodes.length > 0 && (
-                        <Group title='Серверы пула'>
+                        <Group title='Серверы пула' footer={nodesFooter}>
                             {site.nodes.map(n => (
-                                <NodeResult key={n.tag} node={n} />
+                                <NodeResult
+                                    key={n.tag}
+                                    node={n}
+                                    lockedAs={
+                                        site.lock?.node === n.key
+                                            ? site.lock
+                                            : undefined
+                                    }
+                                    pending={pending === n.key}
+                                    busy={lock.isPending}
+                                    onPick={
+                                        n.state === 'ok' &&
+                                        n.exit_ip &&
+                                        site.lock?.node !== n.key
+                                            ? () => pick(n.key)
+                                            : undefined
+                                    }
+                                />
                             ))}
                         </Group>
                     )}
@@ -209,40 +291,173 @@ export function SiteSheet({
     )
 }
 
-function NodeResult({ node }: { node: SiteNode }) {
-    const icon =
-        node.state === 'ok' ? (
-            <IconCheck className='size-[18px] text-success' stroke={2.6} />
-        ) : node.state === 'fail' ? (
-            <IconX className='size-[18px] text-destructive' stroke={2.6} />
-        ) : (
-            <IconQuestionMark
-                className='size-[18px] text-muted-foreground'
+function countryLabel(code?: string) {
+    return countryName(code) || code || '?'
+}
+
+function exitLabel(node: SiteNode) {
+    if (!node.exit_ip) return ''
+    return `${node.exit_ip} · ${countryLabel(node.exit_country)}`
+}
+
+function LockGroup({ site }: { site: Site }) {
+    const { lock, unlock } = useSiteActions()
+    const [error, setError] = useState('')
+
+    useEffect(() => setError(''), [site.id])
+
+    const current = site.lock
+    if (!current) return null
+    const busy = lock.isPending || unlock.isPending
+
+    const run = async (action: () => Promise<unknown>) => {
+        setError('')
+        try {
+            await action()
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Не получилось')
+        }
+    }
+
+    const verified = timeAgo(current.verified_at)
+    const status = current.blocked
+        ? `Заблокирован: ${current.reason || 'выход не подтверждён'}`
+        : verified
+          ? `${current.name} · проверено ${verified === 'только что' ? verified : `${verified} назад`}${current.live ? '' : ', только сервер'}`
+          : `${current.name} · ещё не проверено`
+
+    return (
+        <Group
+            title='Постоянный IP'
+            footer={
+                error ? (
+                    <span className='text-destructive'>{error}</span>
+                ) : current.blocked ? (
+                    'Трафик сайта никуда не идёт. Панель проверяет сервер каждую минуту и вернёт трафик, когда выход снова совпадёт.'
+                ) : (
+                    'Сайт ходит только через этот сервер. При смене IP или страны панель сразу заблокирует сайт.'
+                )
+            }
+        >
+            <Row
+                icon={<LockIcon blocked={current.blocked} />}
+                label={`${current.exit_ip} · ${countryLabel(current.country)}`}
+                hint={
+                    <span className={cn(current.blocked && 'text-destructive')}>
+                        {status}
+                    </span>
+                }
+            />
+            {current.blocked && (
+                <Row
+                    label={
+                        lock.isPending
+                            ? 'Проверяю…'
+                            : 'Принять текущий IP этого сервера'
+                    }
+                    tone='tint'
+                    disabled={busy}
+                    onClick={() =>
+                        run(() =>
+                            lock.mutateAsync({
+                                id: site.id,
+                                node: current.node,
+                            }),
+                        )
+                    }
+                />
+            )}
+            <Row
+                label='Снять закрепление'
+                tone='destructive'
+                disabled={busy}
+                onClick={() => run(() => unlock.mutateAsync(site.id))}
+            />
+        </Group>
+    )
+}
+
+function LockIcon({ blocked }: { blocked: boolean }) {
+    return (
+        <span className='flex w-[30px] justify-center'>
+            <IconLock
+                className={cn(
+                    'size-[18px]',
+                    blocked ? 'text-destructive' : 'text-success',
+                )}
                 stroke={2.4}
             />
-        )
+        </span>
+    )
+}
 
-    const detail =
-        node.state === 'unknown'
-            ? 'не проверен'
-            : node.error
-              ? node.error
-              : node.state === 'ok'
-                ? `${node.ms} мс`
-                : `ответ ${node.status}`
+function NodeResult({
+    node,
+    lockedAs,
+    pending,
+    busy,
+    onPick,
+}: {
+    node: SiteNode
+    lockedAs?: SiteLock
+    pending: boolean
+    busy: boolean
+    onPick?: () => void
+}) {
+    const icon = lockedAs ? (
+        <LockIcon blocked={lockedAs.blocked} />
+    ) : node.state === 'ok' ? (
+        <IconCheck className='size-[18px] text-success' stroke={2.6} />
+    ) : node.state === 'fail' ? (
+        <IconX className='size-[18px] text-destructive' stroke={2.6} />
+    ) : (
+        <IconQuestionMark
+            className='size-[18px] text-muted-foreground'
+            stroke={2.4}
+        />
+    )
+
+    const detail = pending
+        ? busy
+            ? 'Проверяю…'
+            : 'Закрепить?'
+        : node.state === 'unknown'
+          ? 'не проверен'
+          : node.error
+            ? node.error
+            : node.state === 'ok'
+              ? `${node.ms} мс`
+              : `ответ ${node.status}`
 
     return (
         <Row
-            icon={<span className='flex w-[30px] justify-center'>{icon}</span>}
+            icon={
+                lockedAs ? (
+                    icon
+                ) : (
+                    <span className='flex w-[30px] justify-center'>{icon}</span>
+                )
+            }
             label={<span className='block break-words'>{node.name}</span>}
-            hint={countryName(node.country) || undefined}
+            onClick={onPick}
+            disabled={busy && !pending}
+            hint={
+                [
+                    countryName(node.country),
+                    node.exit_ip && `выход ${exitLabel(node)}`,
+                ]
+                    .filter(Boolean)
+                    .join(' · ') || undefined
+            }
             trailing={
                 <span
                     className={cn(
                         'max-w-[40%] shrink-0 truncate text-right text-[15px] tabular-nums',
-                        node.state === 'fail'
-                            ? 'text-destructive'
-                            : 'text-muted-foreground',
+                        pending
+                            ? 'text-tint'
+                            : node.state === 'fail'
+                              ? 'text-destructive'
+                              : 'text-muted-foreground',
                     )}
                 >
                     {detail}
