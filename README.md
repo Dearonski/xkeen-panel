@@ -24,6 +24,11 @@ Skrill0 layout (1.x, `S24xray`) — the layout, the active proxy core
   pool; Xray leaves a dead node without a restart
 - **Any server by hand** — pin any subscription server, in the pool or not; if
   it dies, the panel moves to another server of the same country
+- **Sites** — a site that fails on some servers goes only through the ones that
+  open it — see [A site that opens only through some servers](docs/guides/sentry.md)
+- **One exit IP** — lock a site to a single server; if its IP or country
+  changes, the site is cut off instead of moved, and a router-level kill switch
+  covers core restarts — see [Claude Code through one exit IP](docs/guides/claude-code.md)
 - **Honest status** — checks go through the proxy via a local Xray inbound, so
   a working router uplink is never mistaken for a working VPN
 - **Devices** — choose which devices go through the VPN; the panel manages the
@@ -132,6 +137,13 @@ and take precedence, so `config.yaml` is never rewritten.
 - **Checks have their own inbound.** The panel adds `00_panel_probe.json` (a
   socks inbound on `probe_addr`) and one rule at the top of the routing file
   sending it where client traffic goes.
+- **Sites have their own outbounds.** Each site's servers are copies in
+  `04_sites.json` (`siteN-1`, `siteN-2`… or a single `siteN-pin` when locked),
+  with rules placed above everything but the probe rule.
+- **A lock adds a netfilter hook.** `/opt/etc/ndm/netfilter.d/99-xkeen-panel-lock.sh`
+  rejects forwarded traffic to a locked site's IP ranges. Traffic XKeen
+  intercepts never reaches `FORWARD`, so it only bites when XKeen is not
+  intercepting — during a restart. It is removed with the last lock.
 - **Comments are read, not written.** Xray configs legally carry `//` and
   `/* */`; the panel parses through them, but a file it writes comes back
   without them. The previous content is always kept as `.bak` next to the file.
