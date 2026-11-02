@@ -347,7 +347,7 @@ func runSubscriptionRefresh(ctx context.Context, cfg *models.Config, sm *xkeen.S
 				}
 
 				res, err := xkeen.RefreshPool(rt, cfg.OutboundsFile, cfg.XrayAPIAddr, sm.GetServers(), state,
-					xkeen.PoolSelectionFromConfig(cfg, matcher))
+					xkeen.PoolSelectionFromConfig(cfg, matcher, wd.ExitStore()))
 				switch {
 				case err != nil:
 					wd.Log("[AUTO-UPDATE] Пул не синхронизирован: %v", err)

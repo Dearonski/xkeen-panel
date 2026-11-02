@@ -9,9 +9,12 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"xkeen-panel/internal/models"
 )
 
 // Providers route traffic for big clouds through a second exit, so a single echo service misses it
@@ -133,25 +136,56 @@ func parseEcho(body string) (string, error) {
 	return "", fmt.Errorf("в ответе нет IP")
 }
 
-func ScanPoolExits(rt Runtime, outboundsPath, selector string, store *ExitStore, timeout time.Duration) (bool, error) {
-	layout, err := ReadPoolLayout(outboundsPath, selector)
-	if err != nil {
-		return false, err
+// The whole subscription is scanned, not just the pool, so a pool can be built from clean nodes only
+func ScanSubscriptionExits(rt Runtime, outboundsPath, selector string, servers []models.Server, sel PoolSelection, store *ExitStore, timeout time.Duration) (int, error) {
+	candidates := poolCandidates(servers, sel)
+	keep := map[string]bool{}
+	byKey := map[string]models.Server{}
+	for _, server := range candidates {
+		if key := NodeKeyOfServer(server); key != "" {
+			keep[key] = true
+			byKey[key] = server
+		}
 	}
-	if !store.Stale(layout) {
-		return false, nil
+	// The pool can still hold a node the subscription dropped, and its row keeps the flag until the next refresh
+	if layout, err := ReadPoolLayout(outboundsPath, selector); err == nil {
+		for _, ep := range layout {
+			keep[ep.Key()] = true
+		}
 	}
 
-	nodes, err := poolNodesInFile(outboundsPath, selector)
-	if err != nil {
-		return false, err
+	var stale []models.Server
+	for _, key := range store.Stale(keep) {
+		if server, ok := byKey[key]; ok {
+			stale = append(stale, server)
+		}
 	}
+	if len(stale) == 0 {
+		return 0, nil
+	}
+
+	config, err := ReadOutboundsConfig(outboundsPath)
+	if err != nil {
+		return 0, err
+	}
+	outbounds, _ := config["outbounds"].([]interface{})
+	_, template := findProxyOutbound(outbounds)
+	built, err := BuildPoolOutbounds(stale, "scan-", template, nil)
+	if err != nil {
+		return 0, err
+	}
+	nodes := make([]map[string]interface{}, 0, len(built))
+	for _, raw := range built {
+		if node, ok := raw.(map[string]interface{}); ok {
+			nodes = append(nodes, node)
+		}
+	}
+
 	scanned, err := ScanExits(rt, nodes, timeout)
 	if err != nil {
-		return false, err
+		return 0, err
 	}
-
-	return true, store.Replace(layout, scanned)
+	return len(nodes), store.Update(keep, scanned)
 }
 
 // ExitStore keeps scan results across panel restarts, so auto-pick knows the bad nodes before the first scan ends.
@@ -195,27 +229,29 @@ func (s *ExitStore) Get(node string) (NodeExits, bool) {
 	return exits, ok
 }
 
-func (s *ExitStore) Stale(layout PoolLayout) bool {
+func (s *ExitStore) Stale(nodes map[string]bool) []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for _, ep := range layout {
-		exits, ok := s.nodes[ep.Key()]
+
+	var stale []string
+	for key := range nodes {
+		exits, ok := s.nodes[key]
 		switch {
 		case !ok:
-			return true
+			stale = append(stale, key)
 		case time.Since(exits.FailedAt) < exitRetryAfter:
 		case len(exits.Exits) == 0 || time.Since(exits.CheckedAt) > exitRescanEvery:
-			return true
+			stale = append(stale, key)
 		}
 	}
-	return false
+	sort.Strings(stale)
+	return stale
 }
 
-func (s *ExitStore) Replace(layout PoolLayout, scanned map[string]NodeExits) error {
+func (s *ExitStore) Update(keep map[string]bool, scanned map[string]NodeExits) error {
 	s.mu.Lock()
-	next := make(map[string]NodeExits, len(layout))
-	for _, ep := range layout {
-		key := ep.Key()
+	next := make(map[string]NodeExits, len(keep))
+	for key := range keep {
 		exits, ok := scanned[key]
 		if !ok {
 			exits, ok = s.nodes[key]

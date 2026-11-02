@@ -72,52 +72,50 @@ func TestAvoidedFindsSecondExit(t *testing.T) {
 }
 
 func TestExitStoreStaleness(t *testing.T) {
-	a := endpoint{Address: "a.example", Port: 443, UUID: "u"}
-	b := endpoint{Address: "b.example", Port: 443, UUID: "u"}
-	layout := PoolLayout{"sub-1": a, "sub-2": b}
+	a, b, c := "a.example:443:u", "b.example:443:u", "c.example:443:u"
+	both := map[string]bool{a: true, b: true}
 	dir := t.TempDir()
 	store := NewExitStore(dir)
 
-	if !store.Stale(layout) {
-		t.Fatal("an empty store must be stale")
+	if got := store.Stale(both); len(got) != 2 {
+		t.Fatalf("Stale = %v, want both nodes of an empty store", got)
 	}
 
 	now := time.Now()
 	clean := NodeExits{Exits: []NodeExit{{Via: "Cloudflare", IP: "203.0.113.1"}}, CheckedAt: now}
-	if err := store.Replace(layout, map[string]NodeExits{a.Key(): clean, b.Key(): clean}); err != nil {
+	if err := store.Update(both, map[string]NodeExits{a: clean, b: clean}); err != nil {
 		t.Fatal(err)
 	}
-	if store.Stale(layout) {
-		t.Fatal("a fresh scan of every node must not be stale")
+	if got := store.Stale(both); len(got) != 0 {
+		t.Fatalf("Stale = %v after a fresh scan", got)
 	}
 
 	// b is down: it keeps its last exits and is not retried at once
-	if err := store.Replace(layout, map[string]NodeExits{a.Key(): clean, b.Key(): {CheckedAt: now}}); err != nil {
+	if err := store.Update(both, map[string]NodeExits{b: {CheckedAt: now}}); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := store.Get(b.Key()); len(got.Exits) != 1 || got.FailedAt.IsZero() {
+	if got, _ := store.Get(b); len(got.Exits) != 1 || got.FailedAt.IsZero() {
 		t.Errorf("down node = %+v, want its old exits and a failure mark", got)
 	}
-	if store.Stale(layout) {
-		t.Error("a node that just failed must wait before a rescan")
+	if got := store.Stale(both); len(got) != 0 {
+		t.Errorf("Stale = %v, a node that just failed must wait before a rescan", got)
 	}
 
-	c := endpoint{Address: "c.example", Port: 443, UUID: "u"}
-	if !store.Stale(PoolLayout{"sub-1": a, "sub-3": c}) {
-		t.Error("a node new to the pool must make the store stale")
+	if got := store.Stale(map[string]bool{a: true, c: true}); len(got) != 1 || got[0] != c {
+		t.Errorf("Stale = %v, want only the new node", got)
 	}
 
-	if err := store.Replace(PoolLayout{"sub-1": a}, map[string]NodeExits{a.Key(): clean}); err != nil {
+	if err := store.Update(map[string]bool{a: true}, nil); err != nil {
 		t.Fatal(err)
 	}
 	reloaded := NewExitStore(dir)
 	if err := reloaded.Load(); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := reloaded.Get(b.Key()); ok {
-		t.Error("a node that left the pool must be forgotten")
+	if _, ok := reloaded.Get(b); ok {
+		t.Error("a node that left the subscription must be forgotten")
 	}
-	if _, ok := reloaded.Get(a.Key()); !ok {
+	if _, ok := reloaded.Get(a); !ok {
 		t.Error("results must survive a restart")
 	}
 }

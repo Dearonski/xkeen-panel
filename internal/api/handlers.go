@@ -121,7 +121,7 @@ func (h *Handlers) bootstrapIfEmpty(servers []models.Server) (bool, error) {
 
 	state, err := xkeen.Bootstrap(rt, h.config.OutboundsFile, servers, xkeen.PoolOptions{
 		APIAddr:   h.config.XrayAPIAddr,
-		Selection: xkeen.PoolSelectionFromConfig(h.config, h.geoip),
+		Selection: xkeen.PoolSelectionFromConfig(h.config, h.geoip, h.watchdog.ExitStore()),
 	})
 	if err != nil {
 		log.Printf("[BOOTSTRAP] Не удалось собрать конфиг: %v", err)
@@ -169,7 +169,7 @@ func (h *Handlers) refreshPool(servers []models.Server) (xkeen.SyncResult, error
 	}
 
 	result, err := xkeen.RefreshPool(h.detector.Runtime(), h.config.OutboundsFile, h.config.XrayAPIAddr, servers, state,
-		xkeen.PoolSelectionFromConfig(h.config, h.geoip))
+		xkeen.PoolSelectionFromConfig(h.config, h.geoip, h.watchdog.ExitStore()))
 	if err != nil {
 		log.Printf("[POOL] Синхронизация с подпиской не выполнена: %v", err)
 		return result, err
@@ -542,7 +542,7 @@ func (h *Handlers) HandlePoolEnable(w http.ResponseWriter, r *http.Request) {
 	rt := h.detector.Runtime()
 	state, err := xkeen.EnablePool(rt, h.config.OutboundsFile, servers, xkeen.PoolOptions{
 		APIAddr:   h.config.XrayAPIAddr,
-		Selection: xkeen.PoolSelectionFromConfig(h.config, h.geoip),
+		Selection: xkeen.PoolSelectionFromConfig(h.config, h.geoip, h.watchdog.ExitStore()),
 	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -672,7 +672,7 @@ func (h *Handlers) HandlePoolSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := xkeen.RefreshPool(rt, h.config.OutboundsFile, h.config.XrayAPIAddr, h.subscription.GetServers(), state,
-		xkeen.PoolSelectionFromConfig(h.config, h.geoip))
+		xkeen.PoolSelectionFromConfig(h.config, h.geoip, h.watchdog.ExitStore()))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

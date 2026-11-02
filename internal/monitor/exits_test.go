@@ -41,9 +41,10 @@ func exitWatchdog(t *testing.T, exit1, exit2 string, state xkeen.PoolState) (*Wa
 	scan := func(ip string) xkeen.NodeExits {
 		return xkeen.NodeExits{Exits: []xkeen.NodeExit{{Via: "Google Cloud", IP: ip}}, CheckedAt: time.Now()}
 	}
-	if err := exits.Replace(layout, map[string]xkeen.NodeExits{
-		layout["sub-1"].Key(): scan(exit1),
-		layout["sub-2"].Key(): scan(exit2),
+	key1, key2 := layout["sub-1"].Key(), layout["sub-2"].Key()
+	if err := exits.Update(map[string]bool{key1: true, key2: true}, map[string]xkeen.NodeExits{
+		key1: scan(exit1),
+		key2: scan(exit2),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -105,4 +106,45 @@ func TestPinBestSkipsAvoidedExit(t *testing.T) {
 	if tag != "sub-2" || store.Get().PinnedTag != "sub-2" {
 		t.Errorf("picked %s, want sub-2", tag)
 	}
+}
+
+func TestPoolPrefersCleanExits(t *testing.T) {
+	deURI := "vless://55555555-6666-7777-8888-999999999999@de.example:443?type=tcp&security=reality&sni=c.com&pbk=K#DE"
+	ruExit := models.Server{Name: "NL", Protocol: "vless", RawURI: nlURI}
+	clean := models.Server{Name: "FI", Protocol: "vless", RawURI: fiURI}
+	alsoRU := models.Server{Name: "DE", Protocol: "vless", RawURI: deURI}
+
+	matcher, err := geoip.Load(buildGeoIP(t), []string{"RU"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exits := xkeen.NewExitStore(t.TempDir())
+	scan := func(ip string) xkeen.NodeExits {
+		return xkeen.NodeExits{Exits: []xkeen.NodeExit{{Via: "AWS", IP: ip}}, CheckedAt: time.Now()}
+	}
+	keys := map[string]bool{}
+	for _, s := range []models.Server{ruExit, clean, alsoRU} {
+		keys[xkeen.NodeKeyOfServer(s)] = true
+	}
+	if err := exits.Update(keys, map[string]xkeen.NodeExits{
+		xkeen.NodeKeyOfServer(ruExit): scan("1.2.3.5"),
+		xkeen.NodeKeyOfServer(clean):  scan("8.8.8.8"),
+		xkeen.NodeKeyOfServer(alsoRU): scan("1.2.3.6"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := xkeen.SelectPoolServers([]models.Server{ruExit, clean, alsoRU}, xkeen.PoolSelection{MaxNodes: 2, GeoIP: matcher, Exits: exits})
+
+	if len(got) != 2 || got[0].Name != "FI" {
+		t.Fatalf("pool = %v, want FI first and one avoided exit filling the last slot", names(got))
+	}
+}
+
+func names(servers []models.Server) []string {
+	out := make([]string, len(servers))
+	for i, s := range servers {
+		out[i] = s.Name
+	}
+	return out
 }

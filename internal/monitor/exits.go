@@ -16,6 +16,10 @@ func (w *Watchdog) SetExitStore(store *xkeen.ExitStore) {
 	w.exits = store
 }
 
+func (w *Watchdog) ExitStore() *xkeen.ExitStore {
+	return w.exits
+}
+
 func (w *Watchdog) AvoidedExits() map[string]xkeen.AvoidedExit {
 	avoided, _ := w.avoidedExits()
 	return avoided
@@ -100,27 +104,43 @@ func (w *Watchdog) RunExitScan(ctx context.Context) {
 		}
 
 		attempted = time.Now()
-		scanned, err := xkeen.ScanPoolExits(rt, w.config.OutboundsFile, top.Selector(), w.exits, exitScanTimeout)
+		sel := xkeen.PoolSelectionFromConfig(w.config, w.geoip, w.exits)
+		count, err := xkeen.ScanSubscriptionExits(rt, w.config.OutboundsFile, top.Selector(), w.subscription.GetServers(), sel, w.exits, exitScanTimeout)
 		if err != nil {
-			w.writeLog("[EXIT] Не удалось проверить выходы нод: %v", err)
+			w.writeLog("[EXIT] Не удалось проверить выходы серверов: %v", err)
 			continue
 		}
-		if !scanned {
+		if count == 0 {
 			continue
 		}
+		w.writeLog("[EXIT] Проверены выходы серверов подписки: %d", count)
 
-		avoided, _ := w.avoidedExits()
-		for tag, exit := range avoided {
-			w.writeLog("[EXIT] %s выходит через %s из %s (%s) — автовыбор её пропускает", tag, exit.Via, exit.Country, exit.IP)
+		if avoided := w.AvoidedExits(); len(avoided) > 0 && w.poolStore != nil {
+			w.rebuildPoolWithoutAvoided(rt, top, sel, len(avoided))
+		}
+		for tag, exit := range w.AvoidedExits() {
+			w.writeLog("[EXIT] %s выходит через %s из %s (%s) — чистой замены в подписке нет, автовыбор её пропускает", tag, exit.Via, exit.Country, exit.IP)
 		}
 		w.publishPool()
 
-		if w.poolStore == nil {
-			continue
-		}
-		state := w.poolStore.Get()
-		if _, bad := avoided[state.PinnedTag]; bad && !state.PinManual && w.IsActive() {
+		if w.IsActive() {
 			w.CheckNow()
 		}
+	}
+}
+
+func (w *Watchdog) rebuildPoolWithoutAvoided(rt xkeen.Runtime, top xkeen.Topology, sel xkeen.PoolSelection, avoided int) {
+	state := w.poolStore.Get()
+	state.BalancerTag = top.BalancerTag
+	state.Selector = top.Selector()
+
+	result, err := xkeen.RefreshPool(rt, w.config.OutboundsFile, w.config.XrayAPIAddr, w.subscription.GetServers(), state, sel)
+	switch {
+	case err != nil:
+		w.writeLog("[EXIT] Не удалось пересобрать пул: %v", err)
+	case result.Changed:
+		w.detector.InvalidateTopology()
+		w.writeLog("[EXIT] В пуле было нод с выходом в избегаемой стране: %d — пул пересобран: +%d, -%d, заменено %d",
+			avoided, len(result.Added), len(result.Removed), len(result.Replaced))
 	}
 }

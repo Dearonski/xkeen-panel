@@ -28,6 +28,8 @@ type PoolSelection struct {
 	// Keep holds the endpoints already in the pool. They stay in it as long as
 	// they answer, so ordinary latency jitter cannot reshuffle membership.
 	Keep map[endpoint]bool
+
+	Exits *ExitStore
 }
 
 // SelectPoolServers filters and ranks the subscription for pool membership:
@@ -42,6 +44,25 @@ func SelectPoolServers(servers []models.Server, sel PoolSelection) []models.Serv
 		max = DefaultPoolMaxNodes
 	}
 
+	allowed := poolCandidates(servers, sel)
+	if len(allowed) == 0 {
+		return nil
+	}
+	if len(allowed) <= max && sel.ProbeTimeout <= 0 {
+		return allowed
+	}
+
+	ranked := sel.rankByLatency(allowed)
+	ranked = sel.incumbentsFirst(ranked)
+	ranked = sel.cleanExitsFirst(ranked)
+	if len(ranked) > max {
+		ranked = ranked[:max]
+	}
+
+	return ranked
+}
+
+func poolCandidates(servers []models.Server, sel PoolSelection) []models.Server {
 	var allowed []models.Server
 	for _, server := range servers {
 		if server.RawURI == "" || (server.Protocol != "" && server.Protocol != "vless") {
@@ -52,22 +73,25 @@ func SelectPoolServers(servers []models.Server, sel PoolSelection) []models.Serv
 		}
 		allowed = append(allowed, server)
 	}
-	allowed = uniqueEndpoints(allowed)
+	return uniqueEndpoints(allowed)
+}
 
-	if len(allowed) == 0 {
-		return nil
-	}
-	if len(allowed) <= max && sel.ProbeTimeout <= 0 {
-		return allowed
-	}
-
-	ranked := sel.rankByLatency(allowed)
-	ranked = sel.incumbentsFirst(ranked)
-	if len(ranked) > max {
-		ranked = ranked[:max]
+// Nodes exiting from an avoided country only fill slots no clean node can, since auto-pick skips them anyway
+func (sel PoolSelection) cleanExitsFirst(servers []models.Server) []models.Server {
+	if sel.Exits == nil || sel.GeoIP == nil {
+		return servers
 	}
 
-	return ranked
+	var clean, avoided []models.Server
+	for _, server := range servers {
+		exits, ok := sel.Exits.Get(NodeKeyOfServer(server))
+		if _, bad := exits.Avoided(sel.GeoIP); ok && bad {
+			avoided = append(avoided, server)
+			continue
+		}
+		clean = append(clean, server)
+	}
+	return append(clean, avoided...)
 }
 
 // Providers list one endpoint under several names (an expiry date, a news channel), which took several pool slots
@@ -192,13 +216,14 @@ func (sel PoolSelection) isAvoidedCode(code string) bool {
 }
 
 // PoolSelectionFromConfig builds the selection rules out of the panel config.
-func PoolSelectionFromConfig(cfg *models.Config, matcher *geoip.Matcher) PoolSelection {
+func PoolSelectionFromConfig(cfg *models.Config, matcher *geoip.Matcher, exits *ExitStore) PoolSelection {
 	return PoolSelection{
 		MaxNodes:         cfg.PoolMaxNodes,
 		AvoidCountries:   cfg.AvoidCountries(),
 		GeoIP:            matcher,
 		ProbeTimeout:     time.Duration(cfg.ProbeTimeoutMs) * time.Millisecond,
 		ProbeConcurrency: cfg.ProbeConcurrency,
+		Exits:            exits,
 	}
 }
 
