@@ -100,6 +100,12 @@ func main() {
 	watchdog.SetEventBus(eventBus)
 	watchdog.SetPoolStore(poolStore)
 
+	exitStore := xkeen.NewExitStore(cfg.DataDir)
+	if err := exitStore.Load(); err != nil {
+		log.Printf("Предупреждение: не удалось загрузить выходы нод: %v", err)
+	}
+	watchdog.SetExitStore(exitStore)
+
 	siteStore := xkeen.NewSiteStore(cfg.DataDir)
 	if err := siteStore.Load(); err != nil {
 		log.Printf("Предупреждение: не удалось загрузить сайты: %v", err)
@@ -179,6 +185,7 @@ func main() {
 	}()
 
 	go sites.Run(ctx)
+	go watchdog.RunExitScan(ctx)
 	go sites.RunLocks(ctx)
 
 	// Periodic subscription refresh

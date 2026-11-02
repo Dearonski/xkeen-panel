@@ -145,7 +145,7 @@ func (h *Handlers) bootstrapIfEmpty(servers []models.Server) (bool, error) {
 				log.Printf("[BOOTSTRAP] Ошибка рестарта: %v", err)
 				return
 			}
-			h.pinAfterRestart(rt)
+			h.pinAfterRestart()
 		}()
 	}
 
@@ -514,7 +514,7 @@ func (h *Handlers) HandlePoolStatus(w http.ResponseWriter, r *http.Request) {
 	// The current node is only knowable through the core API, which may be absent
 	if top.Mode == xkeen.TopologyPool {
 		if nodes, err := xkeen.PoolNodes(h.config.OutboundsFile, top.Selector(), h.subscription.GetServers()); err == nil {
-			resp["nodes"] = xkeen.DescribePool(nodes, h.watchdog.ExcludedNodes())
+			resp["nodes"] = xkeen.DescribePool(nodes, h.watchdog.ExcludedNodes(), h.watchdog.AvoidedExits())
 		} else {
 			log.Printf("[POOL] Не удалось прочитать ноды пула: %v", err)
 		}
@@ -559,7 +559,7 @@ func (h *Handlers) HandlePoolEnable(w http.ResponseWriter, r *http.Request) {
 			log.Printf("[POOL] Ошибка рестарта: %v", err)
 			return
 		}
-		h.pinAfterRestart(rt)
+		h.pinAfterRestart()
 	}()
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -575,7 +575,7 @@ func (h *Handlers) HandlePoolEnable(w http.ResponseWriter, r *http.Request) {
 // between nodes and anything IP-bound — Telegram sessions, CDN anti-abuse —
 // breaks. Pinning right after the restart avoids a window of that behaviour
 // before the watchdog's next tick.
-func (h *Handlers) pinAfterRestart(rt xkeen.Runtime) {
+func (h *Handlers) pinAfterRestart() {
 	deadline := time.Now().Add(90 * time.Second)
 	for xkeen.IsRestarting() && time.Now().Before(deadline) {
 		time.Sleep(time.Second)
@@ -584,21 +584,14 @@ func (h *Handlers) pinAfterRestart(rt xkeen.Runtime) {
 	time.Sleep(3 * time.Second)
 
 	h.detector.InvalidateTopology()
-	top := h.detector.Topology()
-	if top.Mode != xkeen.TopologyPool {
+	if h.detector.Topology().Mode != xkeen.TopologyPool {
 		return
 	}
 
-	tag, err := xkeen.PinBestNode(rt, h.config.XrayAPIAddr, h.config.OutboundsFile, top,
-		h.subscription.GetServers(), nil,
-		time.Duration(h.config.ProbeTimeoutMs)*time.Millisecond, h.config.ProbeConcurrency)
+	tag, err := h.watchdog.PinBest()
 	if err != nil {
 		h.watchdog.Log("[PIN] Не удалось закрепить ноду: %v", err)
 		return
-	}
-
-	if err := h.pool.SetPinned(tag, xkeen.NodeKeyForTag(h.config.OutboundsFile, top.Selector(), tag), false); err != nil {
-		log.Printf("[PIN] Не удалось сохранить закрепление: %v", err)
 	}
 	h.watchdog.Log("[PIN] Трафик закреплён за нодой %s", tag)
 }

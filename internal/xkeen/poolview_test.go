@@ -15,7 +15,7 @@ func TestDescribePoolNamesNodesAfterServers(t *testing.T) {
 		{Tag: "sub-2", Address: "b.example", Port: 443},
 	}
 
-	views := DescribePool(nodes, nil)
+	views := DescribePool(nodes, nil, nil)
 
 	if views[0].ServerID != 7 || views[0].Name != server.Name || views[0].Latency != 42 {
 		t.Errorf("matched node = %+v, want server 7 with its name and latency", views[0])
@@ -35,7 +35,7 @@ func TestDescribePoolMarksOnlyLiveExclusions(t *testing.T) {
 		"sub-2": time.Now().Add(-time.Minute),
 	}
 
-	views := DescribePool(nodes, excluded)
+	views := DescribePool(nodes, excluded, nil)
 
 	if views[0].ExcludedUntil == nil {
 		t.Error("sub-1 is still excluded but has no expiry")

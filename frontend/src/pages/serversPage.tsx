@@ -38,7 +38,7 @@ import {
     toneText,
 } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import type { Server } from '@/types'
+import type { PoolNode, Server } from '@/types'
 
 const OTHER = '—'
 
@@ -130,7 +130,7 @@ export function ServersPage() {
                     country: server ? serverCountry(server) : n.country,
                     latency: server?.latency_ms ?? n.latency_ms,
                     current: n.tag === pool?.current_tag,
-                    excluded: !!n.excluded_until,
+                    excluded: !!n.excluded_until || !!n.avoided_exit,
                 }
             })
             .filter(r => matches(query, r.node.name, r.country))
@@ -298,6 +298,7 @@ export function ServersPage() {
                                 latency={r.latency}
                                 current={r.current}
                                 excludedUntil={r.node.excluded_until}
+                                avoidedExit={r.node.avoided_exit}
                                 busy={select.isPending || pin.isPending}
                                 onSelect={() =>
                                     pickNode(r.node.tag, r.node.server_id)
@@ -483,6 +484,7 @@ function PoolRow({
     latency,
     current,
     excludedUntil,
+    avoidedExit,
     busy,
     onSelect,
 }: {
@@ -491,6 +493,7 @@ function PoolRow({
     latency: number
     current: boolean
     excludedUntil?: string
+    avoidedExit?: PoolNode['avoided_exit']
     busy: boolean
     onSelect: () => void
 }) {
@@ -498,6 +501,8 @@ function PoolRow({
         countryName(country),
         excludedUntil &&
             `не отвечал, вернётся в ${new Date(excludedUntil).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })}`,
+        avoidedExit &&
+            `выход в ${avoidedExit.via}: ${countryName(avoidedExit.country) || avoidedExit.country}, автовыбор пропускает`,
     ].filter(Boolean)
 
     return (
@@ -511,7 +516,8 @@ function PoolRow({
                 <span
                     className={cn(
                         'block break-words text-[17px] tracking-[-0.43px]',
-                        excludedUntil && 'text-muted-foreground',
+                        (excludedUntil || avoidedExit) &&
+                            'text-muted-foreground',
                     )}
                 >
                     {name}

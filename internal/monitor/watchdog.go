@@ -53,6 +53,7 @@ type Watchdog struct {
 	badNodes     map[string]time.Time // pool tags an exit check condemned, by expiry
 	lastRotation time.Time
 	poolStore    *xkeen.PoolStore
+	exits        *xkeen.ExitStore
 	trigger      chan struct{}
 }
 
@@ -308,6 +309,10 @@ func (w *Watchdog) superviseP(rt xkeen.Runtime, top xkeen.Topology) {
 		return
 	}
 
+	if !state.PinManual && w.leaveAvoidedExit(rt, top, state.PinnedTag) {
+		return
+	}
+
 	restored, err := xkeen.EnsurePinned(rt, w.config.XrayAPIAddr, top, state.PinnedTag)
 	if err != nil {
 		w.writeLog("[PIN] Не удалось проверить закрепление: %v", err)
@@ -443,17 +448,22 @@ func (w *Watchdog) publishPool() {
 	}
 }
 
-// excludedNodes lists pool tags still serving their condemnation.
+// excludedNodes lists pool tags auto-pick must skip: those serving their condemnation and those exiting from an avoided country.
 func (w *Watchdog) excludedNodes() map[string]bool {
+	avoided := w.AvoidedExits()
+
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	excluded := make(map[string]bool, len(w.badNodes))
+	excluded := make(map[string]bool, len(w.badNodes)+len(avoided))
 	for tag, until := range w.badNodes {
 		if time.Now().After(until) {
 			delete(w.badNodes, tag)
 			continue
 		}
+		excluded[tag] = true
+	}
+	for tag := range avoided {
 		excluded[tag] = true
 	}
 

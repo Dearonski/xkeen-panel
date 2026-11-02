@@ -14,17 +14,18 @@ func (t Topology) Selector() string {
 }
 
 type PoolNodeView struct {
-	Tag           string     `json:"tag"`
-	ServerID      int        `json:"server_id"` // -1 when the node is not in the subscription
-	Name          string     `json:"name"`
-	Address       string     `json:"address"`
-	Port          int        `json:"port"`
-	Country       string     `json:"country,omitempty"`
-	Latency       int        `json:"latency_ms"`
-	ExcludedUntil *time.Time `json:"excluded_until,omitempty"`
+	Tag           string       `json:"tag"`
+	ServerID      int          `json:"server_id"` // -1 when the node is not in the subscription
+	Name          string       `json:"name"`
+	Address       string       `json:"address"`
+	Port          int          `json:"port"`
+	Country       string       `json:"country,omitempty"`
+	Latency       int          `json:"latency_ms"`
+	ExcludedUntil *time.Time   `json:"excluded_until,omitempty"`
+	AvoidedExit   *AvoidedExit `json:"avoided_exit,omitempty"`
 }
 
-func DescribePool(nodes []PoolNode, excluded map[string]time.Time) []PoolNodeView {
+func DescribePool(nodes []PoolNode, excluded map[string]time.Time, avoided map[string]AvoidedExit) []PoolNodeView {
 	views := make([]PoolNodeView, 0, len(nodes))
 
 	for _, node := range nodes {
@@ -47,6 +48,10 @@ func DescribePool(nodes []PoolNode, excluded map[string]time.Time) []PoolNodeVie
 		if until, ok := excluded[node.Tag]; ok && time.Now().Before(until) {
 			until := until
 			view.ExcludedUntil = &until
+		}
+
+		if exit, ok := avoided[node.Tag]; ok {
+			view.AvoidedExit = &exit
 		}
 
 		views = append(views, view)

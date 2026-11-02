@@ -54,6 +54,7 @@ export type PoolNode = {
     country?: string
     latency_ms: number
     excluded_until?: string
+    avoided_exit?: { via: string; ip: string; country: string }
 }
 
 export type SiteNode = {

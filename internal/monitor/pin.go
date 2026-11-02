@@ -107,7 +107,7 @@ func (w *Watchdog) sameCountryReplacement(country, failedURI string) (*models.Se
 		if s.Protocol != "" && s.Protocol != "vless" {
 			continue
 		}
-		if xkeen.ServerCountry(s) != country {
+		if xkeen.ServerCountry(s) != country || w.nodeExitAvoided(xkeen.NodeKeyOfServer(s)) {
 			continue
 		}
 		candidates = append(candidates, s)
