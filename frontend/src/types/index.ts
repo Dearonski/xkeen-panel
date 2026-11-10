@@ -216,3 +216,22 @@ export type DevicesResponse = {
     policy?: { name: string; description: string; mark: string }
     devices: Device[]
 }
+
+export type CoreUpdateState = {
+    current: string
+    latest?: {
+        tag: string
+        notes: string
+        url: string
+        published_at: string
+    }
+    available: boolean
+    supported: boolean
+    reason?: string
+    previous?: string
+    updating: boolean
+    step?: string
+    last_check?: string
+    check_error?: string
+    apply_error?: string
+}

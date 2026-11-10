@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import type {
+    CoreUpdateState,
     DevicesResponse,
     PoolStatus,
     Server,
@@ -79,5 +80,12 @@ export function useUpdate() {
     return useQuery({
         queryKey: ['update'],
         queryFn: () => api.get<UpdateState>('/api/update'),
+    })
+}
+
+export function useCoreUpdate() {
+    return useQuery({
+        queryKey: ['core-update'],
+        queryFn: () => api.get<CoreUpdateState>('/api/core/update'),
     })
 }

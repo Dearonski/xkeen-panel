@@ -9,6 +9,7 @@ import (
 	"time"
 	"xkeen-panel/internal/api"
 	"xkeen-panel/internal/auth"
+	"xkeen-panel/internal/coreupdate"
 	"xkeen-panel/internal/geoip"
 	"xkeen-panel/internal/keenetic"
 	"xkeen-panel/internal/models"
@@ -32,11 +33,12 @@ type Server struct {
 	geoip        *geoip.Matcher
 	eventBus     *sse.EventBus
 	updater      *updater.Updater
+	coreUpdater  *coreupdate.Updater
 	settings     *api.PanelSettingsHandler
 	frontendFS   fs.FS
 }
 
-func New(cfg *models.Config, um *auth.UserManager, sub *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, pool *xkeen.PoolStore, sites *xkeen.SiteManager, matcher *geoip.Matcher, bus *sse.EventBus, upd *updater.Updater, settings *api.PanelSettingsHandler, frontendFS fs.FS) *Server {
+func New(cfg *models.Config, um *auth.UserManager, sub *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, pool *xkeen.PoolStore, sites *xkeen.SiteManager, matcher *geoip.Matcher, bus *sse.EventBus, upd *updater.Updater, core *coreupdate.Updater, settings *api.PanelSettingsHandler, frontendFS fs.FS) *Server {
 	return &Server{
 		config:       cfg,
 		userManager:  um,
@@ -48,6 +50,7 @@ func New(cfg *models.Config, um *auth.UserManager, sub *xkeen.SubscriptionManage
 		geoip:        matcher,
 		eventBus:     bus,
 		updater:      upd,
+		coreUpdater:  core,
 		settings:     settings,
 		frontendFS:   frontendFS,
 	}
@@ -67,6 +70,7 @@ func (s *Server) Handler() http.Handler {
 	authHandler := api.NewAuthHandler(s.userManager, rateLimiter, s.config)
 	webAuthnHandler := api.NewWebAuthnHandler(s.userManager, rateLimiter, s.config)
 	updateHandler := api.NewUpdateHandler(s.updater)
+	coreUpdateHandler := api.NewCoreUpdateHandler(s.coreUpdater)
 	devicesHandler := api.NewDevicesHandler(s.detector, keenetic.DefaultAddr)
 	setupHandler := api.NewSetupHandler(s.detector, s.subscription, s.watchdog, devicesHandler)
 	sitesHandler := api.NewSitesHandler(s.sites)
@@ -159,6 +163,10 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/update/apply", updateHandler.HandleApply)
 			r.Post("/update/rollback", updateHandler.HandleRollback)
 			r.Put("/update/settings", updateHandler.HandleSettings)
+			r.Get("/core/update", coreUpdateHandler.HandleStatus)
+			r.Post("/core/update/check", coreUpdateHandler.HandleCheck)
+			r.Post("/core/update/apply", coreUpdateHandler.HandleApply)
+			r.Post("/core/update/rollback", coreUpdateHandler.HandleRollback)
 
 			r.Get("/logs", handlers.HandleLogs)
 

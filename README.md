@@ -36,6 +36,8 @@ Skrill0 layout (1.x, `S24xray`) — the layout, the active proxy core
 - **Devices** — choose which devices go through the VPN; the panel manages the
   Keenetic `xkeen` policy through the router's own API
 - **Self-update** — installs new releases at night, with rollback
+- **Xray updates** — one tap installs the latest Xray release after testing it
+  against the current configs; if the core does not come up, the old one returns
 - **XKeen settings** — proxying ports, port and IP exclusions, GitHub proxy
 - **Authentication** — passkey (Face ID / Touch ID) or password with TOTP
 - **iPhone home screen** — adds as a standalone app

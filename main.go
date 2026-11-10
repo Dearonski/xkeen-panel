@@ -15,6 +15,7 @@ import (
 	"time"
 	"xkeen-panel/internal/api"
 	"xkeen-panel/internal/auth"
+	"xkeen-panel/internal/coreupdate"
 	"xkeen-panel/internal/geoip"
 	"xkeen-panel/internal/localtz"
 	"xkeen-panel/internal/models"
@@ -223,6 +224,18 @@ func main() {
 	upd.Startup(ctx, func() bool { return panelResponds(cfg.Port) })
 	go upd.Run(ctx)
 
+	coreUpd := coreupdate.New(coreupdate.Options{
+		Runtime: detector.Runtime,
+		DataDir: cfg.DataDir,
+		Restart: watchdog.RestartCore,
+		Busy:    xkeen.IsRestarting,
+		Log:     watchdog.Log,
+		Publish: func(state coreupdate.State) {
+			eventBus.Publish(sse.Event{Type: "core-update", Data: state})
+		},
+	})
+	go coreUpd.Run(ctx)
+
 	// Frontend assets
 	var frontendFS fs.FS
 	distFS, err := fs.Sub(frontendDist, "frontend/dist")
@@ -233,7 +246,7 @@ func main() {
 	}
 
 	// HTTP server
-	srv := server.New(cfg, userManager, subManager, watchdog, detector, poolStore, sites, geoMatcher, eventBus, upd, panelSettings, frontendFS)
+	srv := server.New(cfg, userManager, subManager, watchdog, detector, poolStore, sites, geoMatcher, eventBus, upd, coreUpd, panelSettings, frontendFS)
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Port),
 		Handler: srv.Handler(),

@@ -20,7 +20,12 @@ import {
     type PanelSettings,
 } from '@/components/settingsSheets'
 import { useAuth } from '@/hooks/useAuth'
-import { useServers, useStatus, useUpdate } from '@/hooks/usePanelData'
+import {
+    useCoreUpdate,
+    useServers,
+    useStatus,
+    useUpdate,
+} from '@/hooks/usePanelData'
 import { serverCountry } from '@/lib/format'
 import { api } from '@/lib/api'
 import { passkeySupported, registerPasskey } from '@/lib/webauthn'
@@ -44,6 +49,7 @@ export function SettingsPage() {
     const { logout } = useAuth()
     const status = useStatus().data
     const update = useUpdate().data
+    const core = useCoreUpdate().data
 
     const watchdog = useMutation({
         mutationFn: (active: boolean) =>
@@ -183,6 +189,10 @@ export function SettingsPage() {
                             update?.available && update.latest ? (
                                 <span className='text-tint'>
                                     {update.latest.tag}
+                                </span>
+                            ) : core?.available && core.latest ? (
+                                <span className='text-tint'>
+                                    Xray {core.latest.tag}
                                 </span>
                             ) : (
                                 status?.panel_version
