@@ -18,12 +18,15 @@ sees you in.
 
 **Серверы → Сайты → Добавить сайт** (Servers → Sites → Add site)
 
+Pick **Из шаблона → TikTok** (From template) at the top of the form and the
+fields below fill themselves; or enter them by hand:
+
 | Field | Value |
 | --- | --- |
 | Домены (Domains) | `tiktok.com tiktokv.com tiktokv.us tiktokcdn.com tiktokcdn-us.com ttwstatic.com byteoversea.com ibytedtos.com ibyteimg.com` |
 | IP-адреса (IP addresses) | leave empty |
 | Адрес проверки (Check address) | `https://www.tiktok.com/explore` |
-| Страна со слов сайта (Country the site reports) | `"region":"([A-Z]{2})"` |
+| Страна со слов сайта (Country the site reports, under **Дополнительно**) | `"region":"([A-Z]{2})"` |
 
 - The domains cover the web, the app API and the video CDN.
 - Leave the IP addresses empty: the CDNs are shared with unrelated sites.

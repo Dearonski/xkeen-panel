@@ -6,6 +6,7 @@ import {
     type ReactNode,
 } from 'react'
 import { createPortal } from 'react-dom'
+import { IconChevronLeft } from '@tabler/icons-react'
 import { cn } from '@/lib/utils'
 
 const EXIT_MS = 220
@@ -17,12 +18,14 @@ export function Sheet({
     open,
     onClose,
     title,
+    back,
     done,
     children,
 }: {
     open: boolean
     onClose: () => void
     title: string
+    back?: { label: string; onClick: () => void }
     done?: { label: string; onClick: () => void; disabled?: boolean }
     children: ReactNode
 }) {
@@ -150,13 +153,27 @@ export function Sheet({
                         <div className='h-[5px] w-9 rounded-full bg-white/25' />
                     </div>
                     <header className='grid grid-cols-[1fr_auto_1fr] items-center px-4 pb-2 lg:pt-4'>
-                        <button
-                            type='button'
-                            onClick={onClose}
-                            className='min-h-11 cursor-pointer justify-self-start px-1 text-[17px] text-tint'
-                        >
-                            Отмена
-                        </button>
+                        {back ? (
+                            <button
+                                type='button'
+                                onClick={back.onClick}
+                                className='-ml-2 flex min-h-11 cursor-pointer items-center justify-self-start text-[17px] text-tint'
+                            >
+                                <IconChevronLeft
+                                    className='size-6'
+                                    stroke={2.2}
+                                />
+                                {back.label}
+                            </button>
+                        ) : (
+                            <button
+                                type='button'
+                                onClick={onClose}
+                                className='min-h-11 cursor-pointer justify-self-start px-1 text-[17px] text-tint'
+                            >
+                                Отмена
+                            </button>
+                        )}
                         <h2 className='text-[17px] font-semibold tracking-[-0.43px]'>
                             {title}
                         </h2>

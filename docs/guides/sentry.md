@@ -15,6 +15,9 @@ worked through all of them.
 
 **Серверы → Сайты → Добавить сайт** (Servers → Sites → Add site)
 
+Pick **Из шаблона → Sentry** (From template) at the top of the form and the
+fields below fill themselves; or enter them by hand:
+
 | Field | Value |
 | --- | --- |
 | Домены (Domains) | `sentry.io sentry-cdn.com sentry.dev` |

@@ -9,6 +9,9 @@ instead of moving it elsewhere, if that node's exit ever changes.
 
 **Серверы → Сайты → Добавить сайт** (Servers → Sites → Add site)
 
+Pick **Из шаблона → Claude** (From template) at the top of the form and the
+fields below fill themselves; or enter them by hand:
+
 | Field | Value |
 | --- | --- |
 | Домены (Domains) | `anthropic.com claude.ai claude.com` |
