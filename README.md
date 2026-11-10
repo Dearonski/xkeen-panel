@@ -25,7 +25,9 @@ Skrill0 layout (1.x, `S24xray`) — the layout, the active proxy core
 - **Any server by hand** — pin any subscription server, in the pool or not; if
   it dies, the panel moves to another server of the same country
 - **Sites** — a site that fails on some servers goes only through the ones that
-  open it — see [A site that opens only through some servers](docs/guides/sentry.md)
+  open it — see [A site that opens only through some servers](docs/guides/sentry.md);
+  a site can also be judged by the country it reports seeing you in — see
+  [TikTok that keeps showing the Russian feed](docs/guides/tiktok.md)
 - **One exit IP** — lock a site to a single server; if its IP or country
   changes, the site is cut off instead of moved, and a router-level kill switch
   covers core restarts — see [Claude Code through one exit IP](docs/guides/claude-code.md)

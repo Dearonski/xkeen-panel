@@ -16,14 +16,16 @@ import (
 
 // Site routes a set of domains through the nodes that actually open them.
 type Site struct {
-	ID        int          `json:"id"`
-	Domains   []string     `json:"domains"`
-	IPs       []string     `json:"ips,omitempty"`
-	CheckURL  string       `json:"check_url"`
-	Results   []SiteResult `json:"results,omitempty"`
-	CheckedAt time.Time    `json:"checked_at"`
-	Lock      *SiteLock    `json:"lock,omitempty"`
-	Source    *SiteSource  `json:"source,omitempty"`
+	ID       int      `json:"id"`
+	Domains  []string `json:"domains"`
+	IPs      []string `json:"ips,omitempty"`
+	CheckURL string   `json:"check_url"`
+	// Pulls the country the site itself sees out of the check page, for sites not behind Cloudflare
+	CountryPattern string       `json:"country_pattern,omitempty"`
+	Results        []SiteResult `json:"results,omitempty"`
+	CheckedAt      time.Time    `json:"checked_at"`
+	Lock           *SiteLock    `json:"lock,omitempty"`
+	Source         *SiteSource  `json:"source,omitempty"`
 }
 
 type SiteResult struct {
@@ -179,6 +181,24 @@ func NormalizeCheckURL(raw string, domains []string) (string, error) {
 	}
 
 	return u.String(), nil
+}
+
+func NormalizeCountryPattern(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	if len(raw) > 200 {
+		return "", fmt.Errorf("шаблон страны слишком длинный")
+	}
+	re, err := regexp.Compile(raw)
+	if err != nil {
+		return "", fmt.Errorf("шаблон страны не разобрался: %v", err)
+	}
+	if re.NumSubexp() < 1 {
+		return "", fmt.Errorf("в шаблоне страны нужна группа в скобках вокруг кода страны")
+	}
+	return raw, nil
 }
 
 type SiteStore struct {

@@ -3,6 +3,7 @@ package xkeen
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"sync"
 	"time"
@@ -29,6 +30,8 @@ type SiteManager struct {
 	Logf      func(format string, args ...interface{})
 	ProbeAddr func() string
 	Exits     *ExitStore
+	// Countries a site must not see the owner in, the same list auto-pick avoids
+	AvoidCountries func() []string
 
 	work      sync.Mutex
 	mu        sync.Mutex
@@ -39,19 +42,20 @@ type SiteManager struct {
 
 func NewSiteManager(store *SiteStore, det *Detector, sub *SubscriptionManager, outboundsPath, apiAddr string, timeout time.Duration) *SiteManager {
 	return &SiteManager{
-		store:         store,
-		detector:      det,
-		subscription:  sub,
-		outboundsPath: outboundsPath,
-		apiAddr:       apiAddr,
-		timeout:       timeout,
-		Restart:       func() {},
-		Notify:        func() {},
-		Logf:          func(string, ...interface{}) {},
-		ProbeAddr:     func() string { return "" },
-		checking:      map[int]bool{},
-		attempted:     map[int]time.Time{},
-		verified:      map[int]lockVerification{},
+		store:          store,
+		detector:       det,
+		subscription:   sub,
+		outboundsPath:  outboundsPath,
+		apiAddr:        apiAddr,
+		timeout:        timeout,
+		Restart:        func() {},
+		Notify:         func() {},
+		AvoidCountries: func() []string { return nil },
+		Logf:           func(string, ...interface{}) {},
+		ProbeAddr:      func() string { return "" },
+		checking:       map[int]bool{},
+		attempted:      map[int]time.Time{},
+		verified:       map[int]lockVerification{},
 	}
 }
 
@@ -66,7 +70,7 @@ func (m *SiteManager) Unavailable() string {
 	return ""
 }
 
-func (m *SiteManager) Create(domainsInput, ipsInput []string, checkURL string) (Site, error) {
+func (m *SiteManager) Create(domainsInput, ipsInput []string, checkURL, countryPattern string) (Site, error) {
 	if reason := m.Unavailable(); reason != "" {
 		return Site{}, fmt.Errorf("%s", reason)
 	}
@@ -83,6 +87,10 @@ func (m *SiteManager) Create(domainsInput, ipsInput []string, checkURL string) (
 	if err != nil {
 		return Site{}, err
 	}
+	countryPattern, err = NormalizeCountryPattern(countryPattern)
+	if err != nil {
+		return Site{}, err
+	}
 
 	for _, existing := range m.store.List() {
 		for _, d := range existing.Domains {
@@ -94,7 +102,7 @@ func (m *SiteManager) Create(domainsInput, ipsInput []string, checkURL string) (
 		}
 	}
 
-	site, err := m.store.Add(Site{Domains: domains, IPs: ips, CheckURL: checkURL})
+	site, err := m.store.Add(Site{Domains: domains, IPs: ips, CheckURL: checkURL, CountryPattern: countryPattern})
 	if err != nil {
 		return Site{}, err
 	}
@@ -182,11 +190,19 @@ func (m *SiteManager) check(id int) {
 		return
 	}
 
-	results, err := CheckSite(m.detector.Runtime(), nodes, site.CheckURL, m.timeout)
+	var country *regexp.Regexp
+	if site.CountryPattern != "" {
+		if country, err = regexp.Compile(site.CountryPattern); err != nil {
+			m.Logf("[SITES] Шаблон страны %s не разобрался: %v", site.Domains[0], err)
+			return
+		}
+	}
+	results, err := CheckSite(m.detector.Runtime(), nodes, site.CheckURL, country, m.timeout)
 	if err != nil {
 		m.Logf("[SITES] Проверка %s не выполнена: %v", site.Domains[0], err)
 		return
 	}
+	markAvoidedCountries(results, m.AvoidCountries())
 
 	site.Results = results
 	site.CheckedAt = time.Now()
@@ -298,16 +314,17 @@ func stale(site Site, nodes []string) bool {
 }
 
 type SiteView struct {
-	ID        int            `json:"id"`
-	Domains   []string       `json:"domains"`
-	IPs       []string       `json:"ips"`
-	CheckURL  string         `json:"check_url"`
-	Lock      *SiteLockView  `json:"lock,omitempty"`
-	CheckedAt *time.Time     `json:"checked_at,omitempty"`
-	Checking  bool           `json:"checking"`
-	Passing   int            `json:"passing"`
-	Nodes     []SiteNodeView `json:"nodes"`
-	Source    *SiteSource    `json:"source,omitempty"`
+	ID             int            `json:"id"`
+	Domains        []string       `json:"domains"`
+	IPs            []string       `json:"ips"`
+	CheckURL       string         `json:"check_url"`
+	CountryPattern string         `json:"country_pattern,omitempty"`
+	Lock           *SiteLockView  `json:"lock,omitempty"`
+	CheckedAt      *time.Time     `json:"checked_at,omitempty"`
+	Checking       bool           `json:"checking"`
+	Passing        int            `json:"passing"`
+	Nodes          []SiteNodeView `json:"nodes"`
+	Source         *SiteSource    `json:"source,omitempty"`
 	// The source matched no server, so the site falls back to the pool
 	Fallback bool `json:"fallback"`
 }
@@ -367,13 +384,14 @@ func (m *SiteManager) Views() []SiteView {
 		}
 
 		view := SiteView{
-			ID:       site.ID,
-			Domains:  site.Domains,
-			IPs:      site.IPs,
-			CheckURL: site.CheckURL,
-			Checking: m.Checking(site.ID),
-			Nodes:    []SiteNodeView{},
-			Source:   site.Source,
+			ID:             site.ID,
+			Domains:        site.Domains,
+			IPs:            site.IPs,
+			CheckURL:       site.CheckURL,
+			CountryPattern: site.CountryPattern,
+			Checking:       m.Checking(site.ID),
+			Nodes:          []SiteNodeView{},
+			Source:         site.Source,
 		}
 		if view.IPs == nil {
 			view.IPs = []string{}

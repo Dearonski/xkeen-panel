@@ -92,6 +92,7 @@ export type Site = {
     domains: string[]
     ips: string[]
     check_url: string
+    country_pattern?: string
     lock?: SiteLock
     checked_at?: string
     checking: boolean

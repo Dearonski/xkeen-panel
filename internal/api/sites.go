@@ -29,16 +29,17 @@ func (h *SitesHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 // HandleCreate — POST /api/sites
 func (h *SitesHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Domains  string `json:"domains"`
-		IPs      string `json:"ips"`
-		CheckURL string `json:"check_url"`
+		Domains        string `json:"domains"`
+		IPs            string `json:"ips"`
+		CheckURL       string `json:"check_url"`
+		CountryPattern string `json:"country_pattern"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "неверный формат запроса"})
 		return
 	}
 
-	site, err := h.sites.Create([]string{req.Domains}, []string{req.IPs}, req.CheckURL)
+	site, err := h.sites.Create([]string{req.Domains}, []string{req.IPs}, req.CheckURL, req.CountryPattern)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return

@@ -11,6 +11,7 @@ export function useSiteActions() {
             domains: string
             ips: string
             check_url: string
+            country_pattern: string
         }) => api.post<{ id: number }>('/api/sites', site),
         onSettled: refresh,
     })

@@ -122,6 +122,7 @@ func main() {
 	sites.Restart = func() { go watchdog.RestartCore() }
 	sites.ProbeAddr = watchdog.ProbeAddr
 	sites.Exits = exitStore
+	sites.AvoidCountries = cfg.AvoidCountries
 
 	// Package xkeen logs to stdout by default, which the init script discards —
 	// send its pool and restart events to the panel log instead

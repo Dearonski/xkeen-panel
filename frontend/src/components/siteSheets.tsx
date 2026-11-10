@@ -52,6 +52,7 @@ export function AddSiteSheet({
     const [domains, setDomains] = useState('')
     const [ips, setIPs] = useState('')
     const [checkURL, setCheckURL] = useState('')
+    const [countryPattern, setCountryPattern] = useState('')
     const [error, setError] = useState('')
 
     useEffect(() => {
@@ -59,6 +60,7 @@ export function AddSiteSheet({
         setDomains('')
         setIPs('')
         setCheckURL('')
+        setCountryPattern('')
         setError('')
     }, [open])
 
@@ -70,6 +72,7 @@ export function AddSiteSheet({
                 domains,
                 ips,
                 check_url: checkURL,
+                country_pattern: countryPattern,
             })
             onCreated(res.id)
         } catch (e) {
@@ -152,6 +155,26 @@ export function AddSiteSheet({
                     onChange={e => setCheckURL(e.target.value)}
                     placeholder={`https://${firstDomain(domains) || 'example.com'}/`}
                     className='min-h-[52px] w-full bg-transparent text-[17px] tracking-[-0.43px] outline-none placeholder:text-label-tertiary'
+                />
+            </Group>
+            <Group
+                title='Страна со слов сайта'
+                footer='Необязательно. Регулярное выражение, группа в скобках которого — код страны на странице проверки. Сервер, где сайт видит страну из исключений автовыбора, не проходит.'
+            >
+                <label htmlFor='site-country' className='sr-only'>
+                    Страна со слов сайта
+                </label>
+                <input
+                    id='site-country'
+                    type='text'
+                    autoComplete='off'
+                    autoCapitalize='none'
+                    autoCorrect='off'
+                    spellCheck={false}
+                    value={countryPattern}
+                    onChange={e => setCountryPattern(e.target.value)}
+                    placeholder='"country":"([A-Z]{2})"'
+                    className='min-h-[52px] w-full bg-transparent font-mono text-[15px] outline-none placeholder:text-label-tertiary'
                 />
             </Group>
         </Sheet>
@@ -241,7 +264,7 @@ export function SiteSheet({
                                   ? sourceMode(site) === 'pool'
                                       ? 'Пока ни один сервер не прошёл проверку, сайт идёт через весь пул, как раньше.'
                                       : 'Пока ни один сервер не прошёл проверку, сайт идёт через все выбранные серверы.'
-                                  : `Проверяется ${site.check_url}. Панель перепроверяет сайт, когда меняются его серверы, и раз в 12 часов.`
+                                  : `Проверяется ${site.check_url}.${site.country_pattern ? ' Страну панель берёт из ответа сайта.' : ''} Панель перепроверяет сайт, когда меняются его серверы, и раз в 12 часов.`
                         }
                     >
                         <Row
@@ -535,8 +558,11 @@ function countryLabel(code?: string) {
 }
 
 function exitLabel(node: SiteNode) {
-    if (!node.exit_ip) return ''
-    return `${node.exit_ip} · ${countryLabel(node.exit_country)}`
+    if (node.exit_ip)
+        return `выход ${node.exit_ip} · ${countryLabel(node.exit_country)}`
+    if (node.exit_country)
+        return `сайт видит ${countryLabel(node.exit_country)}`
+    return ''
 }
 
 function LockGroup({ site }: { site: Site }) {
@@ -681,10 +707,7 @@ function NodeResult({
             onClick={onPick}
             disabled={busy && !pending}
             hint={
-                [
-                    countryName(node.country),
-                    node.exit_ip && `выход ${exitLabel(node)}`,
-                ]
+                [countryName(node.country), exitLabel(node)]
                     .filter(Boolean)
                     .join(' · ') || undefined
             }

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -23,18 +24,21 @@ const siteCheckConcurrency = 5
 const siteCheckUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
 
 // A throwaway Xray keeps the check away from the running core and its live connections
-func CheckSite(rt Runtime, nodes []map[string]interface{}, checkURL string, timeout time.Duration) ([]SiteResult, error) {
+func CheckSite(rt Runtime, nodes []map[string]interface{}, checkURL string, country *regexp.Regexp, timeout time.Duration) ([]SiteResult, error) {
 	traceHost := TraceHost(checkURL)
 	results := make([]SiteResult, len(nodes))
 
 	err := throughThrowaway(rt, nodes, func(i int, proxy *url.URL) {
-		result := openThrough(proxy, checkURL, timeout)
+		result := openThrough(proxy, checkURL, country, timeout)
 		if ep, ok := endpointOfOutbound(nodes[i]); ok {
 			result.Node = ep.Key()
 		}
 		if traceHost != "" {
 			if exit, err := Trace(proxy, traceHost, timeout); err == nil {
-				result.ExitIP, result.ExitCountry = exit.IP, exit.Country
+				result.ExitIP = exit.IP
+				if country == nil {
+					result.ExitCountry = exit.Country
+				}
 			}
 		}
 		results[i] = result
@@ -259,7 +263,24 @@ func waitListening(port int, limit time.Duration) error {
 	return fmt.Errorf("порт %d не открылся", port)
 }
 
-func openThrough(proxy *url.URL, checkURL string, timeout time.Duration) SiteResult {
+// Pages that report a country can carry it deep in the HTML: TikTok's sits past the first 90 KB
+const siteCountryReadLimit = 1 << 20
+
+var siteCountryCodeRe = regexp.MustCompile(`^[A-Z]{2}$`)
+
+func countryInBody(re *regexp.Regexp, body []byte) string {
+	m := re.FindSubmatch(body)
+	if m == nil {
+		return ""
+	}
+	cc := strings.ToUpper(strings.TrimSpace(string(m[1])))
+	if !siteCountryCodeRe.MatchString(cc) {
+		return ""
+	}
+	return cc
+}
+
+func openThrough(proxy *url.URL, checkURL string, country *regexp.Regexp, timeout time.Duration) SiteResult {
 	client := &http.Client{
 		Timeout:   timeout,
 		Transport: &http.Transport{Proxy: http.ProxyURL(proxy), DisableKeepAlives: true},
@@ -278,12 +299,38 @@ func openThrough(proxy *url.URL, checkURL string, timeout time.Duration) SiteRes
 		return SiteResult{Error: shortNetError(err)}
 	}
 	defer resp.Body.Close()
-	io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 
-	return SiteResult{
-		OK:     resp.StatusCode < 400,
-		Status: resp.StatusCode,
-		Ms:     int(time.Since(start).Milliseconds()),
+	result := SiteResult{OK: resp.StatusCode < 400, Status: resp.StatusCode}
+	if country == nil || !result.OK {
+		io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+		result.Ms = int(time.Since(start).Milliseconds())
+		return result
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, siteCountryReadLimit))
+	result.Ms = int(time.Since(start).Milliseconds())
+	if err != nil {
+		return SiteResult{Status: resp.StatusCode, Error: shortNetError(err), Ms: result.Ms}
+	}
+	if result.ExitCountry = countryInBody(country, body); result.ExitCountry == "" {
+		result.OK, result.Error = false, "страна не найдена в ответе"
+	}
+	return result
+}
+
+// The site's own view of the country beats the node's: a provider can send this site's traffic out somewhere else
+func markAvoidedCountries(results []SiteResult, avoid []string) {
+	if len(avoid) == 0 {
+		return
+	}
+	bad := make(map[string]bool, len(avoid))
+	for _, cc := range avoid {
+		bad[strings.ToUpper(cc)] = true
+	}
+	for i := range results {
+		if r := &results[i]; r.OK && bad[r.ExitCountry] {
+			r.OK, r.Error = false, "сайт видит "+r.ExitCountry
+		}
 	}
 }
 
