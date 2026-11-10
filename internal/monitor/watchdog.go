@@ -54,6 +54,7 @@ type Watchdog struct {
 	lastRotation time.Time
 	poolStore    *xkeen.PoolStore
 	exits        *xkeen.ExitStore
+	members      *xkeen.MemberStore
 	trigger      chan struct{}
 }
 
@@ -548,7 +549,7 @@ func (w *Watchdog) handlePoolFailover(reason string, top xkeen.Topology, dead bo
 	state := xkeen.PoolState{BalancerTag: top.BalancerTag, Selector: top.Selector()}
 
 	result, err := xkeen.RefreshPool(w.detector.Runtime(), w.config.OutboundsFile, w.config.XrayAPIAddr, servers, state,
-		xkeen.PoolSelectionFromConfig(w.config, w.geoip, w.exits))
+		xkeen.PoolSelectionFromConfig(w.config, w.geoip, w.exits, w.members))
 	switch {
 	case err != nil:
 		w.writeLog("[ERROR] Пул не синхронизирован: %v", err)

@@ -23,9 +23,10 @@ type PoolNodeView struct {
 	Latency       int          `json:"latency_ms"`
 	ExcludedUntil *time.Time   `json:"excluded_until,omitempty"`
 	AvoidedExit   *AvoidedExit `json:"avoided_exit,omitempty"`
+	Member        bool         `json:"member,omitempty"`
 }
 
-func DescribePool(nodes []PoolNode, excluded map[string]time.Time, avoided map[string]AvoidedExit) []PoolNodeView {
+func DescribePool(nodes []PoolNode, excluded map[string]time.Time, avoided map[string]AvoidedExit, members map[string]bool) []PoolNodeView {
 	views := make([]PoolNodeView, 0, len(nodes))
 
 	for _, node := range nodes {
@@ -53,6 +54,8 @@ func DescribePool(nodes []PoolNode, excluded map[string]time.Time, avoided map[s
 		if exit, ok := avoided[node.Tag]; ok {
 			view.AvoidedExit = &exit
 		}
+
+		view.Member = members[endpoint{Address: node.Address, Port: node.Port, UUID: node.UUID}.Key()]
 
 		views = append(views, view)
 	}

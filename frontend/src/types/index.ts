@@ -10,6 +10,7 @@ export type Server = {
     country_override?: string
     last_checked?: string
     pool_tag?: string
+    pool_member?: boolean
 }
 
 export type Status = {
@@ -43,6 +44,7 @@ export type PoolStatus = {
     current_tag?: string
     api_available?: boolean
     nodes?: PoolNode[]
+    members_missing?: number
 }
 
 export type PoolNode = {
@@ -55,6 +57,7 @@ export type PoolNode = {
     latency_ms: number
     excluded_until?: string
     avoided_exit?: { via: string; ip: string; country: string }
+    member?: boolean
 }
 
 export type SiteNode = {

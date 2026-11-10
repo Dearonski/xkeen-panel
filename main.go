@@ -106,6 +106,12 @@ func main() {
 	}
 	watchdog.SetExitStore(exitStore)
 
+	memberStore := xkeen.NewMemberStore(cfg.DataDir)
+	if err := memberStore.Load(); err != nil {
+		log.Printf("Предупреждение: не удалось загрузить ручные ноды пула: %v", err)
+	}
+	watchdog.SetPoolMembers(memberStore)
+
 	siteStore := xkeen.NewSiteStore(cfg.DataDir)
 	if err := siteStore.Load(); err != nil {
 		log.Printf("Предупреждение: не удалось загрузить сайты: %v", err)
@@ -347,7 +353,7 @@ func runSubscriptionRefresh(ctx context.Context, cfg *models.Config, sm *xkeen.S
 				}
 
 				res, err := xkeen.RefreshPool(rt, cfg.OutboundsFile, cfg.XrayAPIAddr, sm.GetServers(), state,
-					xkeen.PoolSelectionFromConfig(cfg, matcher, wd.ExitStore()))
+					xkeen.PoolSelectionFromConfig(cfg, matcher, wd.ExitStore(), wd.PoolMembers()))
 				switch {
 				case err != nil:
 					wd.Log("[AUTO-UPDATE] Пул не синхронизирован: %v", err)

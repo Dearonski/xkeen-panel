@@ -30,6 +30,9 @@ type PoolSelection struct {
 	Keep map[endpoint]bool
 
 	Exits *ExitStore
+
+	// Members are endpoints the owner put into the pool by hand: they take slots first and skip the country filter
+	Members map[string]bool
 }
 
 // SelectPoolServers filters and ranks the subscription for pool membership:
@@ -55,11 +58,36 @@ func SelectPoolServers(servers []models.Server, sel PoolSelection) []models.Serv
 	ranked := sel.rankByLatency(allowed)
 	ranked = sel.incumbentsFirst(ranked)
 	ranked = sel.cleanExitsFirst(ranked)
+	ranked, members := sel.membersFirst(ranked)
+	if members > max {
+		max = members
+	}
 	if len(ranked) > max {
 		ranked = ranked[:max]
 	}
 
 	return ranked
+}
+
+func (sel PoolSelection) isMember(server models.Server) bool {
+	return len(sel.Members) > 0 && sel.Members[NodeKeyOfServer(server)]
+}
+
+// A member stays even when it does not answer: the owner asked for it by name
+func (sel PoolSelection) membersFirst(servers []models.Server) ([]models.Server, int) {
+	if len(sel.Members) == 0 {
+		return servers, 0
+	}
+
+	var members, rest []models.Server
+	for _, server := range servers {
+		if sel.isMember(server) {
+			members = append(members, server)
+			continue
+		}
+		rest = append(rest, server)
+	}
+	return append(members, rest...), len(members)
 }
 
 func poolCandidates(servers []models.Server, sel PoolSelection) []models.Server {
@@ -68,7 +96,7 @@ func poolCandidates(servers []models.Server, sel PoolSelection) []models.Server 
 		if server.RawURI == "" || (server.Protocol != "" && server.Protocol != "vless") {
 			continue
 		}
-		if sel.avoided(server) {
+		if sel.avoided(server) && !sel.isMember(server) {
 			continue
 		}
 		allowed = append(allowed, server)
@@ -216,7 +244,7 @@ func (sel PoolSelection) isAvoidedCode(code string) bool {
 }
 
 // PoolSelectionFromConfig builds the selection rules out of the panel config.
-func PoolSelectionFromConfig(cfg *models.Config, matcher *geoip.Matcher, exits *ExitStore) PoolSelection {
+func PoolSelectionFromConfig(cfg *models.Config, matcher *geoip.Matcher, exits *ExitStore, members *MemberStore) PoolSelection {
 	return PoolSelection{
 		MaxNodes:         cfg.PoolMaxNodes,
 		AvoidCountries:   cfg.AvoidCountries(),
@@ -224,6 +252,7 @@ func PoolSelectionFromConfig(cfg *models.Config, matcher *geoip.Matcher, exits *
 		ProbeTimeout:     time.Duration(cfg.ProbeTimeoutMs) * time.Millisecond,
 		ProbeConcurrency: cfg.ProbeConcurrency,
 		Exits:            exits,
+		Members:          members.Keys(),
 	}
 }
 

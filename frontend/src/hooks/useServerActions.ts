@@ -55,9 +55,23 @@ export function useServerActions() {
         onSettled: () => qc.invalidateQueries({ queryKey: ['servers'] }),
     })
 
+    const setMember = useMutation({
+        mutationFn: ({ id, keep }: { id: number; keep: boolean }) =>
+            api.post('/api/pool/members', { server_id: id, keep }),
+        onMutate: ({ id, keep }) =>
+            qc.setQueryData<Server[]>(['servers'], old =>
+                old?.map(s => (s.id === id ? { ...s, pool_member: keep } : s)),
+            ),
+        onSettled: () => {
+            refreshAll()
+            qc.invalidateQueries({ queryKey: ['sites'] })
+        },
+    })
+
     return {
         select,
         auto,
+        setMember,
         pin,
         refreshSubscription,
         setSubscription,

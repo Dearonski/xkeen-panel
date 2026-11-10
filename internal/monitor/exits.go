@@ -20,6 +20,14 @@ func (w *Watchdog) ExitStore() *xkeen.ExitStore {
 	return w.exits
 }
 
+func (w *Watchdog) SetPoolMembers(store *xkeen.MemberStore) {
+	w.members = store
+}
+
+func (w *Watchdog) PoolMembers() *xkeen.MemberStore {
+	return w.members
+}
+
 func (w *Watchdog) AvoidedExits() map[string]xkeen.AvoidedExit {
 	avoided, _ := w.avoidedExits()
 	return avoided
@@ -104,7 +112,7 @@ func (w *Watchdog) RunExitScan(ctx context.Context) {
 		}
 
 		attempted = time.Now()
-		sel := xkeen.PoolSelectionFromConfig(w.config, w.geoip, w.exits)
+		sel := xkeen.PoolSelectionFromConfig(w.config, w.geoip, w.exits, w.members)
 		count, err := xkeen.ScanSubscriptionExits(rt, w.config.OutboundsFile, top.Selector(), w.subscription.GetServers(), sel, w.exits, exitScanTimeout)
 		if err != nil {
 			w.writeLog("[EXIT] Не удалось проверить выходы серверов: %v", err)

@@ -121,7 +121,7 @@ func (h *Handlers) bootstrapIfEmpty(servers []models.Server) (bool, error) {
 
 	state, err := xkeen.Bootstrap(rt, h.config.OutboundsFile, servers, xkeen.PoolOptions{
 		APIAddr:   h.config.XrayAPIAddr,
-		Selection: xkeen.PoolSelectionFromConfig(h.config, h.geoip, h.watchdog.ExitStore()),
+		Selection: xkeen.PoolSelectionFromConfig(h.config, h.geoip, h.watchdog.ExitStore(), h.watchdog.PoolMembers()),
 	})
 	if err != nil {
 		log.Printf("[BOOTSTRAP] Не удалось собрать конфиг: %v", err)
@@ -169,7 +169,7 @@ func (h *Handlers) refreshPool(servers []models.Server) (xkeen.SyncResult, error
 	}
 
 	result, err := xkeen.RefreshPool(h.detector.Runtime(), h.config.OutboundsFile, h.config.XrayAPIAddr, servers, state,
-		xkeen.PoolSelectionFromConfig(h.config, h.geoip, h.watchdog.ExitStore()))
+		xkeen.PoolSelectionFromConfig(h.config, h.geoip, h.watchdog.ExitStore(), h.watchdog.PoolMembers()))
 	if err != nil {
 		log.Printf("[POOL] Синхронизация с подпиской не выполнена: %v", err)
 		return result, err
@@ -185,7 +185,8 @@ func (h *Handlers) refreshPool(servers []models.Server) (xkeen.SyncResult, error
 // HandleGetServers — GET /api/servers
 type serverView struct {
 	models.Server
-	PoolTag string `json:"pool_tag,omitempty"`
+	PoolTag    string `json:"pool_tag,omitempty"`
+	PoolMember bool   `json:"pool_member,omitempty"`
 }
 
 func (h *Handlers) HandleGetServers(w http.ResponseWriter, r *http.Request) {
@@ -213,6 +214,7 @@ func (h *Handlers) HandleGetServers(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			views[i].PoolTag = tags[key]
+			views[i].PoolMember = h.watchdog.PoolMembers().Has(key)
 			views[i].Active = key == pinned
 		}
 	}
@@ -513,11 +515,22 @@ func (h *Handlers) HandlePoolStatus(w http.ResponseWriter, r *http.Request) {
 
 	// The current node is only knowable through the core API, which may be absent
 	if top.Mode == xkeen.TopologyPool {
-		if nodes, err := xkeen.PoolNodes(h.config.OutboundsFile, top.Selector(), h.subscription.GetServers()); err == nil {
-			resp["nodes"] = xkeen.DescribePool(nodes, h.watchdog.ExcludedNodes(), h.watchdog.AvoidedExits())
+		servers := h.subscription.GetServers()
+		members := h.watchdog.PoolMembers().Keys()
+		if nodes, err := xkeen.PoolNodes(h.config.OutboundsFile, top.Selector(), servers); err == nil {
+			resp["nodes"] = xkeen.DescribePool(nodes, h.watchdog.ExcludedNodes(), h.watchdog.AvoidedExits(), members)
 		} else {
 			log.Printf("[POOL] Не удалось прочитать ноды пула: %v", err)
 		}
+
+		reps := xkeen.NodeRepresentatives(servers)
+		missing := 0
+		for key := range members {
+			if _, ok := reps[key]; !ok {
+				missing++
+			}
+		}
+		resp["members_missing"] = missing
 
 		if target, err := xkeen.CurrentBalancerTarget(rt, h.config.XrayAPIAddr, top.BalancerTag); err == nil {
 			resp["current_tag"] = target
@@ -542,7 +555,7 @@ func (h *Handlers) HandlePoolEnable(w http.ResponseWriter, r *http.Request) {
 	rt := h.detector.Runtime()
 	state, err := xkeen.EnablePool(rt, h.config.OutboundsFile, servers, xkeen.PoolOptions{
 		APIAddr:   h.config.XrayAPIAddr,
-		Selection: xkeen.PoolSelectionFromConfig(h.config, h.geoip, h.watchdog.ExitStore()),
+		Selection: xkeen.PoolSelectionFromConfig(h.config, h.geoip, h.watchdog.ExitStore(), h.watchdog.PoolMembers()),
 	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -594,6 +607,63 @@ func (h *Handlers) pinAfterRestart() {
 		return
 	}
 	h.watchdog.Log("[PIN] Трафик закреплён за нодой %s", tag)
+}
+
+// HandlePoolMember — POST /api/pool/members. Keeps a server in the pool regardless of ping, or lets it go again.
+func (h *Handlers) HandlePoolMember(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ServerID int  `json:"server_id"`
+		Keep     bool `json:"keep"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "неверный формат запроса"})
+		return
+	}
+
+	members := h.watchdog.PoolMembers()
+	if members == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "ручной состав пула недоступен"})
+		return
+	}
+
+	servers := h.subscription.GetServers()
+	if req.ServerID < 0 || req.ServerID >= len(servers) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "сервер не найден"})
+		return
+	}
+	server := servers[req.ServerID]
+	if req.Keep && server.Protocol != "" && server.Protocol != "vless" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "в пул можно добавить только VLESS-сервер"})
+		return
+	}
+	key := xkeen.NodeKeyOfServer(server)
+	if key == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "не удалось разобрать адрес сервера"})
+		return
+	}
+
+	if err := members.Set(key, req.Keep); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if req.Keep {
+		h.watchdog.Log("[POOL] %s добавлен в пул вручную", server.Name)
+	} else {
+		h.watchdog.Log("[POOL] %s больше не держится в пуле", server.Name)
+	}
+
+	result, err := h.refreshPool(servers)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"success":    true,
+		"changed":    result.Changed,
+		"live":       result.Live,
+		"restarting": result.Restarted,
+	})
 }
 
 func (h *Handlers) HandlePoolPin(w http.ResponseWriter, r *http.Request) {
@@ -672,7 +742,7 @@ func (h *Handlers) HandlePoolSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := xkeen.RefreshPool(rt, h.config.OutboundsFile, h.config.XrayAPIAddr, h.subscription.GetServers(), state,
-		xkeen.PoolSelectionFromConfig(h.config, h.geoip, h.watchdog.ExitStore()))
+		xkeen.PoolSelectionFromConfig(h.config, h.geoip, h.watchdog.ExitStore(), h.watchdog.PoolMembers()))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

@@ -143,6 +143,7 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/pool/sync", handlers.HandlePoolSync)
 			r.Post("/pool/pin", handlers.HandlePoolPin)
 			r.Post("/pool/auto", handlers.HandlePoolAuto)
+			r.Post("/pool/members", handlers.HandlePoolMember)
 
 			r.Get("/sites", sitesHandler.HandleList)
 			r.Post("/sites", sitesHandler.HandleCreate)

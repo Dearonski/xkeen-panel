@@ -5,6 +5,8 @@ import {
     IconChevronRight,
     IconLink,
     IconPencil,
+    IconPin,
+    IconPinFilled,
     IconPlus,
     IconRefresh,
     IconSearch,
@@ -68,6 +70,7 @@ export function ServersPage() {
         select,
         pin,
         auto,
+        setMember,
         refreshSubscription,
         setSubscription,
         setCountry,
@@ -127,6 +130,7 @@ export function ServersPage() {
                 const server = byId.get(n.server_id)
                 return {
                     node: n,
+                    member: server?.pool_member ?? !!n.member,
                     country: server ? serverCountry(server) : n.country,
                     latency: server?.latency_ms ?? n.latency_ms,
                     current: n.tag === pool?.current_tag,
@@ -149,6 +153,11 @@ export function ServersPage() {
         onSelect: () => select.mutate(s.id),
         onSetCountry: (c: string) =>
             setCountry.mutate({ id: s.id, country: c }),
+        onToggleMember:
+            isPool && s.protocol === 'vless'
+                ? () => setMember.mutate({ id: s.id, keep: !s.pool_member })
+                : undefined,
+        memberBusy: setMember.isPending,
     })
 
     const isAuto = isPool && !pool?.pin_manual
@@ -257,11 +266,17 @@ export function ServersPage() {
                 <div className='flex flex-col gap-4 lg:grid lg:grid-cols-2 lg:items-start'>
                     <Group
                         title='Пул'
-                        footer={
+                        footer={[
                             isAuto
                                 ? 'Панель держит трафик на самом быстром сервере пула и сама переключается, если он перестал работать.'
-                                : 'Трафик закреплён за выбранным сервером. Включите автовыбор, чтобы панель снова выбирала сама.'
-                        }
+                                : 'Трафик закреплён за выбранным сервером. Включите автовыбор, чтобы панель снова выбирала сама.',
+                            'Булавка держит сервер в пуле, даже если он не из самых быстрых. Добавить любой сервер можно на вкладке «Все».',
+                            pool?.members_missing
+                                ? `Пропали из подписки: ${pool.members_missing} из добавленных вручную.`
+                                : '',
+                        ]
+                            .filter(Boolean)
+                            .join(' ')}
                     >
                         <div className='flex min-h-[52px] items-center gap-3 py-2'>
                             <span className='min-w-0 flex-1'>
@@ -299,10 +314,21 @@ export function ServersPage() {
                                 current={r.current}
                                 excludedUntil={r.node.excluded_until}
                                 avoidedExit={r.node.avoided_exit}
+                                member={r.member}
                                 busy={select.isPending || pin.isPending}
                                 onSelect={() =>
                                     pickNode(r.node.tag, r.node.server_id)
                                 }
+                                onToggleMember={
+                                    r.node.server_id >= 0
+                                        ? () =>
+                                              setMember.mutate({
+                                                  id: r.node.server_id,
+                                                  keep: !r.member,
+                                              })
+                                        : undefined
+                                }
+                                memberBusy={setMember.isPending}
                             />
                         ))}
                         {poolRows.length === 0 && (
@@ -485,8 +511,11 @@ function PoolRow({
     current,
     excludedUntil,
     avoidedExit,
+    member,
     busy,
     onSelect,
+    onToggleMember,
+    memberBusy,
 }: {
     name: string
     country?: string
@@ -494,11 +523,15 @@ function PoolRow({
     current: boolean
     excludedUntil?: string
     avoidedExit?: PoolNode['avoided_exit']
+    member: boolean
     busy: boolean
     onSelect: () => void
+    onToggleMember?: () => void
+    memberBusy: boolean
 }) {
     const notes = [
         countryName(country),
+        member && 'добавлен вручную',
         excludedUntil &&
             `не отвечал, вернётся в ${new Date(excludedUntil).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })}`,
         avoidedExit &&
@@ -506,45 +539,88 @@ function PoolRow({
     ].filter(Boolean)
 
     return (
-        <button
-            type='button'
-            onClick={onSelect}
-            disabled={busy || current}
-            className='flex min-h-[52px] w-full cursor-pointer items-center gap-3 py-2 text-left disabled:cursor-default'
-        >
-            <span className='min-w-0 flex-1'>
+        <div className='flex items-center gap-1'>
+            <button
+                type='button'
+                onClick={onSelect}
+                disabled={busy || current}
+                className='flex min-h-[52px] min-w-0 flex-1 cursor-pointer items-center gap-3 py-2 text-left disabled:cursor-default'
+            >
+                <span className='min-w-0 flex-1'>
+                    <span
+                        className={cn(
+                            'block break-words text-[17px] tracking-[-0.43px]',
+                            (excludedUntil || avoidedExit) &&
+                                'text-muted-foreground',
+                        )}
+                    >
+                        {name}
+                    </span>
+                    {notes.length > 0 && (
+                        <span className='mt-0.5 block text-[13px] text-muted-foreground'>
+                            {notes.join(' · ')}
+                        </span>
+                    )}
+                </span>
                 <span
                     className={cn(
-                        'block break-words text-[17px] tracking-[-0.43px]',
-                        (excludedUntil || avoidedExit) &&
-                            'text-muted-foreground',
+                        'shrink-0 text-right text-[15px] tabular-nums',
+                        toneText[latencyTone(latency)],
                     )}
                 >
-                    {name}
+                    {latency === 0 ? '' : latency < 0 ? '—' : `${latency} мс`}
                 </span>
-                {notes.length > 0 && (
-                    <span className='mt-0.5 block text-[13px] text-muted-foreground'>
-                        {notes.join(' · ')}
-                    </span>
-                )}
-            </span>
-            <span
-                className={cn(
-                    'shrink-0 text-right text-[15px] tabular-nums',
-                    toneText[latencyTone(latency)],
-                )}
-            >
-                {latency === 0 ? '' : latency < 0 ? '—' : `${latency} мс`}
-            </span>
-            <span className='flex w-6 justify-center'>
-                {current && (
-                    <IconCheck
-                        className='size-[18px] text-tint'
-                        stroke={2.8}
-                        aria-label='Сейчас используется'
-                    />
-                )}
-            </span>
+                <span className='flex w-6 justify-center'>
+                    {current && (
+                        <IconCheck
+                            className='size-[18px] text-tint'
+                            stroke={2.8}
+                            aria-label='Сейчас используется'
+                        />
+                    )}
+                </span>
+            </button>
+            {onToggleMember && (
+                <MemberToggle
+                    name={name}
+                    member={member}
+                    busy={memberBusy}
+                    onToggle={onToggleMember}
+                />
+            )}
+        </div>
+    )
+}
+
+function MemberToggle({
+    name,
+    member,
+    busy,
+    onToggle,
+}: {
+    name: string
+    member: boolean
+    busy: boolean
+    onToggle: () => void
+}) {
+    const Icon = member ? IconPinFilled : IconPin
+    return (
+        <button
+            type='button'
+            aria-label={
+                member ? `Не держать ${name} в пуле` : `Держать ${name} в пуле`
+            }
+            aria-pressed={member}
+            onClick={onToggle}
+            disabled={busy}
+            className={cn(
+                'flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-full disabled:opacity-50',
+                member
+                    ? 'text-tint'
+                    : 'text-label-tertiary hover:text-muted-foreground',
+            )}
+        >
+            <Icon className='size-[18px]' />
         </button>
     )
 }
@@ -564,6 +640,11 @@ function statusOf(server: Server) {
     if (server.active) return { label: 'Выбран', className: 'text-tint' }
     if (server.latency_ms === -1)
         return { label: 'Не отвечает', className: 'text-destructive' }
+    if (server.pool_member)
+        return {
+            label: server.pool_tag ? 'В пуле · вручную' : 'Добавляется в пул…',
+            className: 'text-muted-foreground',
+        }
     if (server.pool_tag)
         return { label: 'В пуле', className: 'text-muted-foreground' }
     return null
@@ -615,11 +696,15 @@ function ServerRow({
     busy,
     onSelect,
     onSetCountry,
+    onToggleMember,
+    memberBusy,
 }: {
     server: Server
     busy: boolean
     onSelect: () => void
     onSetCountry: (country: string) => void
+    onToggleMember?: () => void
+    memberBusy: boolean
 }) {
     const [editing, setEditing] = useState(false)
     const [value, setValue] = useState(serverCountry(server))
@@ -723,6 +808,14 @@ function ServerRow({
             >
                 <IconPencil className='size-4' />
             </button>
+            {onToggleMember && (
+                <MemberToggle
+                    name={server.name}
+                    member={!!server.pool_member}
+                    busy={memberBusy}
+                    onToggle={onToggleMember}
+                />
+            )}
         </div>
     )
 }
