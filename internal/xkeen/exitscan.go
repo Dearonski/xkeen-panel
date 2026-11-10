@@ -30,8 +30,9 @@ const exitRescanEvery = 6 * time.Hour
 const exitRetryAfter = 30 * time.Minute
 
 type NodeExit struct {
-	Via string `json:"via"`
-	IP  string `json:"ip"`
+	Via     string `json:"via"`
+	IP      string `json:"ip"`
+	Country string `json:"country,omitempty"`
 }
 
 type NodeExits struct {
@@ -66,6 +67,16 @@ func (e NodeExits) Avoided(m IPMatcher) (AvoidedExit, bool) {
 	return AvoidedExit{}, false
 }
 
+// Country is where the node exits per Cloudflare's trace, the one probe that reports it
+func (e NodeExits) Country() string {
+	for _, exit := range e.Exits {
+		if exit.Country != "" {
+			return exit.Country
+		}
+	}
+	return ""
+}
+
 func ScanExits(rt Runtime, nodes []map[string]interface{}, timeout time.Duration) (map[string]NodeExits, error) {
 	results := make([]NodeExits, len(nodes))
 	err := throughThrowaway(rt, nodes, func(i int, proxy *url.URL) {
@@ -87,14 +98,14 @@ func ScanExits(rt Runtime, nodes []map[string]interface{}, timeout time.Duration
 func probeExits(proxy *url.URL, timeout time.Duration) NodeExits {
 	result := NodeExits{CheckedAt: time.Now()}
 	for _, probe := range exitProbes {
-		if ip, err := echoIP(proxy, probe.URL, timeout); err == nil {
-			result.Exits = append(result.Exits, NodeExit{Via: probe.Via, IP: ip})
+		if exit, err := echoIP(proxy, probe.URL, timeout); err == nil {
+			result.Exits = append(result.Exits, NodeExit{Via: probe.Via, IP: exit.IP, Country: exit.Country})
 		}
 	}
 	return result
 }
 
-func echoIP(proxy *url.URL, rawURL string, timeout time.Duration) (string, error) {
+func echoIP(proxy *url.URL, rawURL string, timeout time.Duration) (Exit, error) {
 	transport := &http.Transport{DisableKeepAlives: true}
 	if proxy != nil {
 		transport.Proxy = http.ProxyURL(proxy)
@@ -103,37 +114,37 @@ func echoIP(proxy *url.URL, rawURL string, timeout time.Duration) (string, error
 
 	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
-		return "", err
+		return Exit{}, err
 	}
 	req.Header.Set("User-Agent", siteCheckUserAgent)
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("%s", shortNetError(err))
+		return Exit{}, fmt.Errorf("%s", shortNetError(err))
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 	if err != nil {
-		return "", err
+		return Exit{}, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("%s ответил %d", rawURL, resp.StatusCode)
+		return Exit{}, fmt.Errorf("%s ответил %d", rawURL, resp.StatusCode)
 	}
 
 	return parseEcho(string(body))
 }
 
-func parseEcho(body string) (string, error) {
+func parseEcho(body string) (Exit, error) {
 	if strings.Contains(body, "ip=") {
 		if exit := parseTrace(body); exit.IP != "" {
-			return exit.IP, nil
+			return exit, nil
 		}
 	}
 	if ip := net.ParseIP(strings.TrimSpace(body)); ip != nil {
-		return ip.String(), nil
+		return Exit{IP: ip.String()}, nil
 	}
-	return "", fmt.Errorf("в ответе нет IP")
+	return Exit{}, fmt.Errorf("в ответе нет IP")
 }
 
 // The whole subscription is scanned, not just the pool, so a pool can be built from clean nodes only
@@ -164,21 +175,9 @@ func ScanSubscriptionExits(rt Runtime, outboundsPath, selector string, servers [
 		return 0, nil
 	}
 
-	config, err := ReadOutboundsConfig(outboundsPath)
+	nodes, err := outboundsForServers(outboundsPath, stale)
 	if err != nil {
 		return 0, err
-	}
-	outbounds, _ := config["outbounds"].([]interface{})
-	_, template := findProxyOutbound(outbounds)
-	built, err := BuildPoolOutbounds(stale, "scan-", template, nil)
-	if err != nil {
-		return 0, err
-	}
-	nodes := make([]map[string]interface{}, 0, len(built))
-	for _, raw := range built {
-		if node, ok := raw.(map[string]interface{}); ok {
-			nodes = append(nodes, node)
-		}
 	}
 
 	scanned, err := ScanExits(rt, nodes, timeout)
@@ -241,6 +240,9 @@ func (s *ExitStore) Stale(nodes map[string]bool) []string {
 			stale = append(stale, key)
 		case time.Since(exits.FailedAt) < exitRetryAfter:
 		case len(exits.Exits) == 0 || time.Since(exits.CheckedAt) > exitRescanEvery:
+			stale = append(stale, key)
+		// Scans from before exits carried a country; the retry delay keeps a node whose trace fails from rescanning every minute
+		case exits.Country() == "" && time.Since(exits.CheckedAt) > exitRetryAfter:
 			stale = append(stale, key)
 		}
 	}

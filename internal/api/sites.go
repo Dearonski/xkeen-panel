@@ -112,6 +112,31 @@ func (h *SitesHandler) HandleUnlock(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
+// HandleSource — PUT /api/sites/{id}/source. Empty lists put the site back on the pool.
+func (h *SitesHandler) HandleSource(w http.ResponseWriter, r *http.Request) {
+	id, ok := siteID(w, r)
+	if !ok {
+		return
+	}
+	var req xkeen.SiteSource
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "неверный формат запроса"})
+		return
+	}
+
+	if err := h.sites.SetSource(id, req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+// HandleSources — GET /api/sites/sources
+func (h *SitesHandler) HandleSources(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, h.sites.SourceOptions())
+}
+
 func siteID(w http.ResponseWriter, r *http.Request) (int, bool) {
 	id, err := strconv.Atoi(chi.URLParam(r, "id"))
 	if err != nil {

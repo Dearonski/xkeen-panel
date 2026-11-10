@@ -6,6 +6,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"xkeen-panel/internal/models"
 )
 
 // A node passing today can be banned tomorrow, so results expire even when the pool holds still
@@ -26,6 +28,7 @@ type SiteManager struct {
 	Notify    func()
 	Logf      func(format string, args ...interface{})
 	ProbeAddr func() string
+	Exits     *ExitStore
 
 	work      sync.Mutex
 	mu        sync.Mutex
@@ -156,9 +159,26 @@ func (m *SiteManager) check(id int) {
 	}
 
 	top := m.detector.Topology()
-	nodes, err := poolNodesInFile(m.outboundsPath, top.Selector())
+	pool, err := poolNodesInFile(m.outboundsPath, top.Selector())
 	if err != nil {
 		m.Logf("[SITES] Не удалось прочитать пул: %v", err)
+		return
+	}
+	nodes, err := m.siteNodes(site, pool)
+	if err != nil {
+		m.Logf("[SITES] Не удалось собрать серверы для %s: %v", site.Domains[0], err)
+		return
+	}
+	if len(nodes) == 0 {
+		m.Logf("[SITES] Для %s не нашлось ни одного сервера под выбранный источник — сайт идёт через весь пул", site.Domains[0])
+		site.Results, site.CheckedAt = nil, time.Now()
+		if err := m.store.Put(site); err != nil {
+			m.Logf("[SITES] Не удалось сохранить результат: %v", err)
+			return
+		}
+		if err := m.applyLocked(); err != nil {
+			m.Logf("[SITES] Не удалось применить: %v", err)
+		}
 		return
 	}
 
@@ -178,8 +198,10 @@ func (m *SiteManager) check(id int) {
 	passing := len(site.Passing())
 	if site.Lock != nil {
 		m.Logf("[SITES] %s открывается через %d из %d нод, закрепление не тронуто", site.Domains[0], passing, len(results))
-	} else if passing == 0 {
+	} else if passing == 0 && site.Source.IsPool() {
 		m.Logf("[SITES] %s не открывается ни через одну ноду — оставляю весь пул", site.Domains[0])
+	} else if passing == 0 {
+		m.Logf("[SITES] %s не открывается ни через один выбранный сервер — оставляю их все", site.Domains[0])
 	} else {
 		m.Logf("[SITES] %s открывается через %d из %d нод", site.Domains[0], passing, len(results))
 	}
@@ -197,11 +219,24 @@ func (m *SiteManager) applyLocked() error {
 	}
 
 	top := m.detector.Topology()
+	sourced := map[int][]map[string]interface{}{}
+	for _, site := range sites {
+		if site.Lock != nil || site.Source.IsPool() {
+			continue
+		}
+		nodes, err := m.siteNodes(site, nil)
+		if err != nil {
+			return err
+		}
+		sourced[site.ID] = nodes
+	}
+
 	restart, err := ApplySites(m.detector.Runtime(), SiteApply{
 		OutboundsPath: m.outboundsPath,
 		Selector:      top.Selector(),
 		PoolBalancer:  top.BalancerTag,
 		APIAddr:       m.apiAddr,
+		Sourced:       sourced,
 	}, sites)
 	if err != nil {
 		return err
@@ -215,7 +250,7 @@ func (m *SiteManager) applyLocked() error {
 	return nil
 }
 
-// Run rechecks a site whenever the pool gained a node its results do not cover, and on a timer.
+// Run rechecks a site whenever its nodes gained one its results do not cover, and on a timer.
 func (m *SiteManager) Run(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
@@ -240,7 +275,7 @@ func (m *SiteManager) Run(ctx context.Context) {
 			if m.Checking(site.ID) || time.Since(m.attempted[site.ID]) < siteRetryAfter {
 				continue
 			}
-			if stale(site, layout) {
+			if stale(site, m.siteNodeKeys(site, layout)) {
 				m.attempted[site.ID] = time.Now()
 				m.setChecking(site.ID, true)
 				m.check(site.ID)
@@ -249,13 +284,13 @@ func (m *SiteManager) Run(ctx context.Context) {
 	}
 }
 
-func stale(site Site, layout PoolLayout) bool {
+func stale(site Site, nodes []string) bool {
 	if time.Since(site.CheckedAt) > siteRecheckEvery {
 		return true
 	}
 	checked := site.CheckedNodes()
-	for _, ep := range layout {
-		if !checked[ep.Key()] {
+	for _, key := range nodes {
+		if !checked[key] {
 			return true
 		}
 	}
@@ -272,6 +307,9 @@ type SiteView struct {
 	Checking  bool           `json:"checking"`
 	Passing   int            `json:"passing"`
 	Nodes     []SiteNodeView `json:"nodes"`
+	Source    *SiteSource    `json:"source,omitempty"`
+	// The source matched no server, so the site falls back to the pool
+	Fallback bool `json:"fallback"`
 }
 
 type SiteLockView struct {
@@ -303,11 +341,21 @@ type SiteNodeView struct {
 	ExitCountry string `json:"exit_country,omitempty"`
 }
 
-// Views joins stored results with the pool as it is now; nodes added since the last check show as unknown.
+type siteNodeRow struct {
+	key, tag, address string
+	server            *models.Server
+}
+
+// Views joins stored results with the site's nodes as they are now; nodes added since the last check show as unknown.
 func (m *SiteManager) Views() []SiteView {
-	var nodes []PoolNode
+	servers := m.subscription.GetServers()
+	var poolRows []siteNodeRow
 	if top := m.detector.Topology(); top.Mode == TopologyPool {
-		nodes, _ = PoolNodes(m.outboundsPath, top.Selector(), m.subscription.GetServers())
+		nodes, _ := PoolNodes(m.outboundsPath, top.Selector(), servers)
+		for _, node := range nodes {
+			key := endpoint{Address: node.Address, Port: node.Port, UUID: node.UUID}.Key()
+			poolRows = append(poolRows, siteNodeRow{key: key, tag: node.Tag, address: node.Address, server: node.Server})
+		}
 	}
 
 	sites := m.store.List()
@@ -325,6 +373,7 @@ func (m *SiteManager) Views() []SiteView {
 			CheckURL: site.CheckURL,
 			Checking: m.Checking(site.ID),
 			Nodes:    []SiteNodeView{},
+			Source:   site.Source,
 		}
 		if view.IPs == nil {
 			view.IPs = []string{}
@@ -349,16 +398,31 @@ func (m *SiteManager) Views() []SiteView {
 			view.CheckedAt = &at
 		}
 
-		for _, node := range nodes {
-			key := endpoint{Address: node.Address, Port: node.Port, UUID: node.UUID}.Key()
-			nv := SiteNodeView{Key: key, Tag: node.Tag, ServerID: -1, Name: node.Address, State: "unknown"}
-			if s := node.Server; s != nil {
+		rows := poolRows
+		if !site.Source.IsPool() {
+			rows = nil
+			for _, server := range sourceServers(site.Source, servers, m.Exits) {
+				server := server
+				rows = append(rows, siteNodeRow{key: NodeKeyOfServer(server), address: server.Address, server: &server})
+			}
+			view.Fallback = len(rows) == 0
+			if view.Fallback {
+				rows = poolRows
+			}
+		}
+
+		for _, row := range rows {
+			nv := SiteNodeView{Key: row.key, Tag: row.tag, ServerID: -1, Name: row.address, State: "unknown"}
+			if s := row.server; s != nil {
 				nv.ServerID, nv.Name, nv.Country = s.ID, s.Name, ServerCountry(*s)
 			}
-			if r, ok := byNode[key]; ok {
+			if r, ok := byNode[row.key]; ok {
 				nv.State, nv.Status, nv.Error, nv.Ms = "fail", r.Status, r.Error, r.Ms
 				nv.ExitIP, nv.ExitCountry = r.ExitIP, r.ExitCountry
-				if r.OK {
+				switch {
+				case r.OK && !site.Source.allowsCountry(r.ExitCountry):
+					nv.Error = "не та страна"
+				case r.OK:
 					nv.State = "ok"
 					view.Passing++
 				}

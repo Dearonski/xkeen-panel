@@ -212,14 +212,14 @@ func TestSiteStale(t *testing.T) {
 	b := endpoint{Address: "b", Port: 443, UUID: "u"}
 	site := Site{CheckedAt: time.Now(), Results: []SiteResult{{Node: a.Key()}}}
 
-	if stale(site, PoolLayout{"sub-1": a}) {
+	if stale(site, []string{a.Key()}) {
 		t.Error("a fresh check of the same pool is not stale")
 	}
-	if !stale(site, PoolLayout{"sub-1": a, "sub-2": b}) {
+	if !stale(site, []string{a.Key(), b.Key()}) {
 		t.Error("a node the check never saw makes the site stale")
 	}
 	site.CheckedAt = time.Now().Add(-siteRecheckEvery - time.Minute)
-	if !stale(site, PoolLayout{"sub-1": a}) {
+	if !stale(site, []string{a.Key()}) {
 		t.Error("an old check is stale")
 	}
 }

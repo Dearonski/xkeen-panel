@@ -4,6 +4,7 @@ import type {
     DevicesResponse,
     PoolStatus,
     Server,
+    SiteSourceOptions,
     SitesResponse,
     Status,
     SubscriptionInfo,
@@ -38,6 +39,14 @@ export function useSites() {
     return useQuery({
         queryKey: ['sites'],
         queryFn: () => api.get<SitesResponse>('/api/sites'),
+    })
+}
+
+export function useSiteSources(enabled: boolean) {
+    return useQuery({
+        queryKey: ['site-sources'],
+        queryFn: () => api.get<SiteSourceOptions>('/api/sites/sources'),
+        enabled,
     })
 }
 

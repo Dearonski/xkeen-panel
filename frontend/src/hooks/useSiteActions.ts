@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import type { SiteSource } from '@/types'
 
 export function useSiteActions() {
     const qc = useQueryClient()
@@ -35,5 +36,11 @@ export function useSiteActions() {
         onSettled: refresh,
     })
 
-    return { create, check, remove, lock, unlock }
+    const setSource = useMutation({
+        mutationFn: ({ id, source }: { id: number; source: SiteSource }) =>
+            api.put(`/api/sites/${id}/source`, source),
+        onSettled: refresh,
+    })
+
+    return { create, check, remove, lock, unlock, setSource }
 }

@@ -121,6 +121,7 @@ func main() {
 	sites.Notify = func() { eventBus.Publish(sse.Event{Type: "sites", Data: struct{}{}}) }
 	sites.Restart = func() { go watchdog.RestartCore() }
 	sites.ProbeAddr = watchdog.ProbeAddr
+	sites.Exits = exitStore
 
 	// Package xkeen logs to stdout by default, which the init script discards —
 	// send its pool and restart events to the panel log instead

@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// Site routes a set of domains through the pool nodes that actually open them.
+// Site routes a set of domains through the nodes that actually open them.
 type Site struct {
 	ID        int          `json:"id"`
 	Domains   []string     `json:"domains"`
@@ -23,6 +23,7 @@ type Site struct {
 	Results   []SiteResult `json:"results,omitempty"`
 	CheckedAt time.Time    `json:"checked_at"`
 	Lock      *SiteLock    `json:"lock,omitempty"`
+	Source    *SiteSource  `json:"source,omitempty"`
 }
 
 type SiteResult struct {
@@ -51,7 +52,7 @@ type SiteLock struct {
 func (s Site) Passing() map[string]bool {
 	passing := map[string]bool{}
 	for _, r := range s.Results {
-		if r.OK {
+		if r.OK && s.Source.allowsCountry(r.ExitCountry) {
 			passing[r.Node] = true
 		}
 	}
@@ -279,8 +280,8 @@ func (s *SiteStore) saveLocked() error {
 	return writeFileAtomic(s.path, data, 0600)
 }
 
-// A site with no passing node gets the whole pool, so a failed check never cuts it off; a blocked lock gets nothing, and Xray drops traffic to a missing tag
-func siteOutbounds(sites []Site, pool []map[string]interface{}) []interface{} {
+// A site with no passing node gets all its nodes, and one whose source matched nothing gets the pool, so a failed check never cuts it off; a blocked lock gets nothing, and Xray drops traffic to a missing tag
+func siteOutbounds(sites []Site, pool []map[string]interface{}, sourced map[int][]map[string]interface{}) []interface{} {
 	var outbounds []interface{}
 
 	for _, site := range sites {
@@ -293,16 +294,20 @@ func siteOutbounds(sites []Site, pool []map[string]interface{}) []interface{} {
 			continue
 		}
 
+		nodes := pool
+		if own := sourced[site.ID]; len(own) > 0 {
+			nodes = own
+		}
 		passing := site.Passing()
 
 		var chosen []map[string]interface{}
-		for _, node := range pool {
+		for _, node := range nodes {
 			if ep, ok := endpointOfOutbound(node); ok && passing[ep.Key()] {
 				chosen = append(chosen, node)
 			}
 		}
 		if len(chosen) == 0 {
-			chosen = pool
+			chosen = nodes
 		}
 
 		for i, node := range chosen {
@@ -510,6 +515,7 @@ type SiteApply struct {
 	Selector      string
 	PoolBalancer  string
 	APIAddr       string
+	Sourced       map[int][]map[string]interface{}
 }
 
 // Only a change in routing needs a restart; swapping a site's nodes goes through the core API
@@ -531,7 +537,7 @@ func ApplySites(rt Runtime, opts SiteApply, sites []Site) (restart bool, err err
 	existed := ReadJSONC(sitesPath, &current) == nil
 	oldOutbounds := asSlice(current["outbounds"])
 
-	outbounds := siteOutbounds(sites, pool)
+	outbounds := siteOutbounds(sites, pool, opts.Sourced)
 	if outbounds == nil {
 		outbounds = []interface{}{}
 	}

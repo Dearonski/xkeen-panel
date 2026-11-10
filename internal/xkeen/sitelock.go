@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"xkeen-panel/internal/models"
 )
 
 const lockCheckEvery = time.Minute
@@ -80,35 +82,14 @@ func (m *SiteManager) Lock(id int, nodeKey string) error {
 		return fmt.Errorf("адрес проверки %s должен быть на одном из доменов сайта", host)
 	}
 
-	top := m.detector.Topology()
-	pool, err := poolNodesInFile(m.outboundsPath, top.Selector())
+	outbound, name, err := m.lockOutbound(nodeKey)
 	if err != nil {
 		return err
-	}
-	var outbound map[string]interface{}
-	for _, node := range pool {
-		if ep, ok := endpointOfOutbound(node); ok && ep.Key() == nodeKey {
-			outbound = deepCopy(node)
-			delete(outbound, "tag")
-			break
-		}
-	}
-	if outbound == nil {
-		return fmt.Errorf("ноды нет в пуле")
 	}
 
 	exit, err := TraceThroughNode(rt, outbound, host, m.timeout)
 	if err != nil {
 		return fmt.Errorf("не удалось узнать выходной IP: %w", err)
-	}
-
-	name := nodeKey
-	if nodes, err := PoolNodes(m.outboundsPath, top.Selector(), m.subscription.GetServers()); err == nil {
-		for _, n := range nodes {
-			if (endpoint{Address: n.Address, Port: n.Port, UUID: n.UUID}).Key() == nodeKey && n.Server != nil {
-				name = n.Server.Name
-			}
-		}
 	}
 
 	m.work.Lock()
@@ -138,6 +119,38 @@ func (m *SiteManager) Lock(id int, nodeKey string) error {
 	m.Logf("[LOCK] %s закреплён за %s: %s (%s)", site.Domains[0], name, exit.IP, exit.Country)
 	m.Notify()
 	return nil
+}
+
+// Any subscription server can carry a lock, not only a pool node; a pool node the subscription dropped still can
+func (m *SiteManager) lockOutbound(nodeKey string) (map[string]interface{}, string, error) {
+	for _, server := range vlessServers(m.subscription.GetServers()) {
+		if NodeKeyOfServer(server) != nodeKey {
+			continue
+		}
+		nodes, err := outboundsForServers(m.outboundsPath, []models.Server{server})
+		if err != nil {
+			return nil, "", err
+		}
+		if len(nodes) == 0 {
+			break
+		}
+		outbound := nodes[0]
+		delete(outbound, "tag")
+		return outbound, server.Name, nil
+	}
+
+	pool, err := poolNodesInFile(m.outboundsPath, m.detector.Topology().Selector())
+	if err != nil {
+		return nil, "", err
+	}
+	for _, node := range pool {
+		if ep, ok := endpointOfOutbound(node); ok && ep.Key() == nodeKey {
+			outbound := deepCopy(node)
+			delete(outbound, "tag")
+			return outbound, nodeKey, nil
+		}
+	}
+	return nil, "", fmt.Errorf("сервера нет ни в подписке, ни в пуле")
 }
 
 func (m *SiteManager) Unlock(id int) error {

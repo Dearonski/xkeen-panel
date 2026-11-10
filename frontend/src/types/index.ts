@@ -97,6 +97,25 @@ export type Site = {
     checking: boolean
     passing: number
     nodes: SiteNode[]
+    source?: SiteSource
+    fallback: boolean
+}
+
+export type SiteSource = {
+    countries?: string[]
+    nodes?: string[]
+}
+
+export type SiteSourceOptions = {
+    countries: { code: string; servers: number }[]
+    servers: {
+        key: string
+        server_id: number
+        name: string
+        country?: string
+        exit_country?: string
+        latency_ms: number
+    }[]
 }
 
 export type SitesResponse = {

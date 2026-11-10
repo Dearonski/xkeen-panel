@@ -19,15 +19,16 @@ func (ruMatcher) Match(ip net.IP) (string, bool) {
 
 func TestParseEcho(t *testing.T) {
 	cases := []struct {
-		body, want string
+		body string
+		want Exit
 	}{
-		{"fl=123\nh=1.1.1.1\nip=194.9.118.50\nts=1\nloc=LV\n", "194.9.118.50"},
-		{"89.19.223.190\n", "89.19.223.190"},
-		{"  2001:db8::1 ", "2001:db8::1"},
+		{"fl=123\nh=1.1.1.1\nip=194.9.118.50\nts=1\nloc=LV\n", Exit{IP: "194.9.118.50", Country: "LV"}},
+		{"89.19.223.190\n", Exit{IP: "89.19.223.190"}},
+		{"  2001:db8::1 ", Exit{IP: "2001:db8::1"}},
 	}
 	for _, c := range cases {
 		if got, err := parseEcho(c.body); err != nil || got != c.want {
-			t.Errorf("parseEcho(%q) = %q, %v; want %q", c.body, got, err, c.want)
+			t.Errorf("parseEcho(%q) = %+v, %v; want %+v", c.body, got, err, c.want)
 		}
 	}
 
@@ -46,8 +47,8 @@ func TestEchoIPRejectsErrorStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if ip, err := echoIP(nil, srv.URL+"/ip", time.Second); err != nil || ip != "203.0.113.7" {
-		t.Errorf("echoIP = %q, %v", ip, err)
+	if exit, err := echoIP(nil, srv.URL+"/ip", time.Second); err != nil || exit.IP != "203.0.113.7" {
+		t.Errorf("echoIP = %+v, %v", exit, err)
 	}
 	if _, err := echoIP(nil, srv.URL+"/denied", time.Second); err == nil {
 		t.Error("an error page must not count as an exit")
