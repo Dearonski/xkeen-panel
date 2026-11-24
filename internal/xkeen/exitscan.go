@@ -67,6 +67,25 @@ func (e NodeExits) Avoided(m IPMatcher) (AvoidedExit, bool) {
 	return AvoidedExit{}, false
 }
 
+// SingleExit reports that every network the scan reached saw the node from one address; one answer alone proves nothing.
+func (e NodeExits) SingleExit() bool {
+	return len(e.Exits) > 1 && !e.SplitExit()
+}
+
+func (e NodeExits) SplitExit() bool {
+	for _, exit := range e.Exits {
+		if exit.IP != e.Exits[0].IP {
+			return true
+		}
+	}
+	return false
+}
+
+// Failing reports that the most recent scan got no answer through the node.
+func (e NodeExits) Failing() bool {
+	return len(e.Exits) == 0 || e.FailedAt.After(e.CheckedAt)
+}
+
 // Country is where the node exits per Cloudflare's trace, the one probe that reports it
 func (e NodeExits) Country() string {
 	for _, exit := range e.Exits {

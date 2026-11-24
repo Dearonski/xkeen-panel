@@ -25,6 +25,8 @@ const (
 	// Minimum gap between exit rotations, so a service that blocks the whole
 	// pool cannot make the panel cycle through it.
 	rotationCooldown = 30 * time.Minute
+
+	rotateAttempts = 4
 )
 
 type Watchdog struct {
@@ -146,6 +148,9 @@ func (w *Watchdog) check() {
 		return
 	}
 
+	// Unpinned, the balancer sends the check through whatever node leastPing picks, and its failure would be blamed on the pinned one
+	w.restorePin()
+
 	proxy := w.proxyURL()
 	latency, err := fetchLatency(w.config.CheckURL, proxy, 10*time.Second)
 
@@ -211,7 +216,8 @@ func (w *Watchdog) check() {
 	}
 	w.publishStatus()
 
-	if proactive {
+	// A pool refresh cannot make the pinned node faster, it only churns membership
+	if proactive && w.detector.Topology().Mode != xkeen.TopologyPool {
 		w.handleFailover(fmt.Sprintf("высокий пинг %dms подряд", latency), false)
 		return
 	}
@@ -325,6 +331,46 @@ func (w *Watchdog) superviseP(rt xkeen.Runtime, top xkeen.Topology) {
 	}
 }
 
+// restorePin re-applies a pin the core lost in a restart; a pin that no longer means its node is left to superviseP.
+func (w *Watchdog) restorePin() bool {
+	if w.poolStore == nil {
+		return false
+	}
+	top := w.detector.Topology()
+	state := w.poolStore.Get()
+	if top.Mode != xkeen.TopologyPool || state.PinnedTag == "" ||
+		xkeen.PinDrifted(w.config.OutboundsFile, top.Selector(), state.PinnedTag, state.PinnedNode) {
+		return false
+	}
+
+	restored, err := xkeen.EnsurePinned(w.detector.Runtime(), w.config.XrayAPIAddr, top, state.PinnedTag)
+	if err != nil {
+		return false
+	}
+	if restored {
+		w.writeLog("[PIN] Закрепление восстановлено после перезапуска ядра: %s", state.PinnedTag)
+		w.publishPool()
+	}
+	return true
+}
+
+// CoreReturned follows a restart the panel did not run itself, such as XKeen updating: once the core's API answers, the pin goes back and a check runs.
+func (w *Watchdog) CoreReturned() {
+	deadline := time.Now().Add(90 * time.Second)
+	for time.Now().Before(deadline) {
+		rt, top := w.detector.Runtime(), w.detector.Topology()
+		if top.Mode != xkeen.TopologyPool {
+			if xkeen.IsRunning(rt.Core) {
+				break
+			}
+		} else if xkeen.BalancerAPIAvailable(rt, w.config.XrayAPIAddr, top.BalancerTag) {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
+	w.CheckNow()
+}
+
 // keepManualPick follows a hand-picked server out of the pool: a refresh that
 // reshuffles the fastest nodes is no reason to drop the owner's choice.
 func (w *Watchdog) keepManualPick(state xkeen.PoolState) bool {
@@ -362,13 +408,7 @@ func (w *Watchdog) rotateExit(rt xkeen.Runtime, top xkeen.Topology) {
 	}
 
 	if current := state.PinnedTag; current != "" {
-		ttl := time.Duration(w.config.BlacklistTTLSec) * time.Second
-		if ttl <= 0 {
-			ttl = 30 * time.Minute
-		}
-		w.mu.Lock()
-		w.badNodes[current] = time.Now().Add(ttl)
-		w.mu.Unlock()
+		w.condemn(current)
 	}
 
 	tag, err := w.pinBest(rt, top)
@@ -377,12 +417,37 @@ func (w *Watchdog) rotateExit(rt xkeen.Runtime, top xkeen.Topology) {
 		return
 	}
 
+	// The fastest ping proves nothing about traffic, and finding that out one failed check at a time costs minutes per node
+	proxy := w.proxyURL()
+	for attempt := 1; proxy != nil && attempt < rotateAttempts; attempt++ {
+		if _, err := fetchLatency(w.config.CheckURL, proxy, 10*time.Second); err == nil {
+			break
+		}
+		w.writeLog("[HEALTH] Через %s проверка не проходит — пробую следующую ноду", tag)
+		w.condemn(tag)
+		next, err := w.pinBest(rt, top)
+		if err != nil {
+			break
+		}
+		tag = next
+	}
+
 	w.mu.Lock()
 	w.lastRotation = time.Now()
 	w.mu.Unlock()
 
 	w.health.Reset()
 	w.writeLog("[HEALTH] Выход переключён на %s", tag)
+}
+
+func (w *Watchdog) condemn(tag string) {
+	ttl := time.Duration(w.config.BlacklistTTLSec) * time.Second
+	if ttl <= 0 {
+		ttl = 30 * time.Minute
+	}
+	w.mu.Lock()
+	w.badNodes[tag] = time.Now().Add(ttl)
+	w.mu.Unlock()
 }
 
 // pinBest picks the fastest node that is not currently condemned and pins it.
@@ -449,9 +514,10 @@ func (w *Watchdog) publishPool() {
 	}
 }
 
-// excludedNodes lists pool tags auto-pick must skip: those serving their condemnation and those exiting from an avoided country.
+// excludedNodes lists pool tags auto-pick must skip: those serving their condemnation, those exiting from an avoided country and those the last exit scan got nothing through.
 func (w *Watchdog) excludedNodes() map[string]bool {
 	avoided := w.AvoidedExits()
+	failing := w.failingExits()
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -465,6 +531,9 @@ func (w *Watchdog) excludedNodes() map[string]bool {
 		excluded[tag] = true
 	}
 	for tag := range avoided {
+		excluded[tag] = true
+	}
+	for _, tag := range failing {
 		excluded[tag] = true
 	}
 
@@ -546,7 +615,12 @@ func (w *Watchdog) handlePoolFailover(reason string, top xkeen.Topology, dead bo
 	}
 
 	servers := w.subscription.GetServers()
-	state := xkeen.PoolState{BalancerTag: top.BalancerTag, Selector: top.Selector()}
+	// The stored state names the api file, without which a refresh restarts the core instead of swapping nodes live
+	state := xkeen.PoolState{}
+	if w.poolStore != nil {
+		state = w.poolStore.Get()
+	}
+	state.BalancerTag, state.Selector = top.BalancerTag, top.Selector()
 
 	result, err := xkeen.RefreshPool(w.detector.Runtime(), w.config.OutboundsFile, w.config.XrayAPIAddr, servers, state,
 		xkeen.PoolSelectionFromConfig(w.config, w.geoip, w.exits, w.members))

@@ -17,6 +17,7 @@ import (
 var (
 	restartMu            sync.Mutex
 	restarting           bool
+	restartSeq           int
 	OnRestartStateChange func(restarting bool)
 
 	runningMu        sync.Mutex
@@ -82,6 +83,7 @@ func Restart(dispatcher string) (string, error) {
 		return "restart already in progress", nil
 	}
 	restarting = true
+	restartSeq++
 	restartMu.Unlock()
 
 	if OnRestartStateChange != nil {
@@ -109,6 +111,34 @@ func Restart(dispatcher string) (string, error) {
 	}()
 
 	return "restart initiated", nil
+}
+
+// Maintenance runs a dispatcher command that restarts the core by itself, holding the restart flag so checks stand down meanwhile.
+func Maintenance(dispatcher string, timeout time.Duration, args ...string) (string, error) {
+	restartMu.Lock()
+	if restarting {
+		restartMu.Unlock()
+		return "", fmt.Errorf("ядро сейчас перезапускается — попробуйте через минуту")
+	}
+	restarting = true
+	restartSeq++
+	restartMu.Unlock()
+
+	if OnRestartStateChange != nil {
+		OnRestartStateChange(true)
+	}
+
+	output, err := runXkeen(dispatcher, timeout, args...)
+
+	restartMu.Lock()
+	restarting = false
+	restartMu.Unlock()
+
+	if OnRestartStateChange != nil {
+		OnRestartStateChange(false)
+	}
+
+	return output, err
 }
 
 // Start starts the proxy core. The `on` argument mirrors what `xkeen -start`
@@ -152,6 +182,26 @@ func IsRestarting() bool {
 	restartMu.Lock()
 	defer restartMu.Unlock()
 	return restarting
+}
+
+// RestartSeq changes with every restart, so work that spans one can tell.
+func RestartSeq() int {
+	restartMu.Lock()
+	defer restartMu.Unlock()
+	return restartSeq
+}
+
+// WaitCoreSettled blocks while the core restarts: `xkeen -restart` kills every xray process, a throwaway included, and the API refuses connections.
+func WaitCoreSettled() {
+	if !IsRestarting() {
+		return
+	}
+	deadline := time.Now().Add(restartTimeout)
+	for IsRestarting() && time.Now().Before(deadline) {
+		time.Sleep(time.Second)
+	}
+	// The core needs a moment past process start before its API answers
+	time.Sleep(3 * time.Second)
 }
 
 // IsRunning reports whether the proxy core process is alive. Cached for 2s —

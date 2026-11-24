@@ -59,6 +59,29 @@ func (w *Watchdog) avoidedExits() (map[string]xkeen.AvoidedExit, int) {
 	return avoided, len(layout)
 }
 
+// A node answering a TCP ping can still carry no traffic, which only the exit scan sees
+func (w *Watchdog) failingExits() []string {
+	if w.exits == nil {
+		return nil
+	}
+	top := w.detector.Topology()
+	if top.Mode != xkeen.TopologyPool {
+		return nil
+	}
+	layout, err := xkeen.ReadPoolLayout(w.config.OutboundsFile, top.Selector())
+	if err != nil {
+		return nil
+	}
+
+	var failing []string
+	for tag, ep := range layout {
+		if exits, ok := w.exits.Get(ep.Key()); ok && exits.Failing() {
+			failing = append(failing, tag)
+		}
+	}
+	return failing
+}
+
 func (w *Watchdog) nodeExitAvoided(node string) bool {
 	if w.geoip == nil || node == "" {
 		return false
