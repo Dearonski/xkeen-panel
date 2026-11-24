@@ -67,6 +67,38 @@ func TestRefreshPoolNoopWhenUnchanged(t *testing.T) {
 	}
 }
 
+// A provider can change a server's transport in place; the endpoint stays, the outbound must not.
+func TestRefreshPoolRewritesOutdatedOutbound(t *testing.T) {
+	rt, outboundsPath := liveConfDir(t)
+
+	state, err := EnablePool(rt, outboundsPath, poolServers(), PoolOptions{})
+	if err != nil {
+		t.Fatalf("EnablePool: %v", err)
+	}
+
+	masked := poolServers()
+	masked[1].RawURI += "&fm=%7B%22tcp%22%3A%5B%7B%22type%22%3A%22header-custom%22%7D%5D%7D"
+
+	result, err := RefreshPool(rt, outboundsPath, "", masked, state, PoolSelection{})
+	if err != nil {
+		t.Fatalf("RefreshPool: %v", err)
+	}
+	if !result.Changed || len(result.Replaced) != 1 || len(result.Added)+len(result.Removed) != 0 {
+		t.Fatalf("result = %+v, want exactly the changed node replaced", result)
+	}
+
+	nodes, _ := poolNodesByTag(outboundsPath, DefaultPoolSelector)
+	stream, _ := nodes[result.Replaced[0]]["streamSettings"].(map[string]interface{})
+	if _, ok := stream["finalmask"]; !ok {
+		t.Errorf("%s was not rewritten with the mask", result.Replaced[0])
+	}
+
+	again, err := RefreshPool(rt, outboundsPath, "", masked, state, PoolSelection{})
+	if err != nil || again.Changed {
+		t.Errorf("second refresh: %+v err=%v, want a no-op or the pool is rewritten forever", again, err)
+	}
+}
+
 func TestRefreshPoolReportsAddedAndRemoved(t *testing.T) {
 	rt, outboundsPath := liveConfDir(t)
 

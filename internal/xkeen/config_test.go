@@ -192,3 +192,27 @@ func vnextEntry(t *testing.T, outbound map[string]interface{}) map[string]interf
 	vnext := settings["vnext"].([]interface{})
 	return vnext[0].(map[string]interface{})
 }
+
+func TestBuildOutboundFinalMask(t *testing.T) {
+	const masked = "vless://22222222-3333-4444-5555-666666666666@mqtt.example:1883?encryption=mlkem768x25519plus.native.0rtt.KEY&flow=xtls-rprx-vision&security=none&type=tcp&fm=%7B%22tcp%22%3A%5B%7B%22type%22%3A%22header-custom%22%2C%22settings%22%3A%7B%22clients%22%3A%5B%5D%7D%7D%5D%7D"
+
+	params, err := ParseVLESS(masked)
+	if err != nil {
+		t.Fatalf("ParseVLESS: %v", err)
+	}
+	stream := buildOutboundFromURI(params, "sub-1", formatFlat)["streamSettings"].(map[string]interface{})
+
+	mask, ok := stream["finalmask"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("streamSettings = %v, want finalmask: the server resets a connection made without it", stream)
+	}
+	if tcp := asSlice(mask["tcp"]); len(tcp) != 1 || tcp[0].(map[string]interface{})["type"] != "header-custom" {
+		t.Errorf("finalmask = %v, want the tcp mask from the URI", mask)
+	}
+
+	params, _ = ParseVLESS(realityURI + "&fm=%7B%7D")
+	stream = buildOutboundFromURI(params, "sub-1", formatFlat)["streamSettings"].(map[string]interface{})
+	if _, present := stream["finalmask"]; present {
+		t.Error("an empty fm must not add a finalmask block")
+	}
+}

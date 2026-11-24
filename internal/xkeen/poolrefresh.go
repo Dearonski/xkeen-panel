@@ -50,10 +50,18 @@ func RefreshPool(rt Runtime, outboundsPath, apiAddr string, servers []models.Ser
 		return result, err
 	}
 	if matches {
-		return result, nil
+		// Same servers, but the provider may have changed a transport parameter in place
+		outdated, err := poolOutboundsOutdated(outboundsPath, wanted, selector)
+		if err != nil || !outdated {
+			return result, err
+		}
 	}
 
 	before := current
+	beforeNodes, err := poolNodesByTag(outboundsPath, selector)
+	if err != nil {
+		return result, err
+	}
 
 	if err := SyncPool(rt, outboundsPath, wanted, state, PoolSelection{MaxNodes: len(wanted)}); err != nil {
 		return result, err
@@ -89,7 +97,11 @@ func RefreshPool(rt Runtime, outboundsPath, apiAddr string, servers []models.Ser
 	// Only the tags whose endpoint actually changed need touching in the running
 	// core. Treating every surviving tag as replaced tore down all ten outbounds
 	// on each refresh, and with them every connection they carried.
-	result.Replaced = changedTags(before, after)
+	afterNodes, err := poolNodesByTag(outboundsPath, selector)
+	if err != nil {
+		return result, err
+	}
+	result.Replaced = changedTags(beforeNodes, afterNodes)
 
 	// The live path is attempted only for an api block the panel wrote, because
 	// only then is HandlerService guaranteed present. Otherwise the removals
@@ -287,16 +299,65 @@ func tagsMissingFrom(a, b PoolLayout) []string {
 	return missing
 }
 
-// changedTags lists tags present in both layouts whose endpoint differs.
-func changedTags(before, after PoolLayout) []string {
+// Any difference counts, not only the endpoint: a node that gained a transport setting has to be replaced in the running core too
+func changedTags(before, after map[string]map[string]interface{}) []string {
 	var changed []string
-	for tag, oldEP := range before {
-		if newEP, present := after[tag]; present && newEP != oldEP {
+	for tag, old := range before {
+		if next, present := after[tag]; present && !sameJSON(old, next) {
 			changed = append(changed, tag)
 		}
 	}
 	sort.Strings(changed)
 	return changed
+}
+
+func poolNodesByTag(path, selector string) (map[string]map[string]interface{}, error) {
+	nodes, err := poolNodesInFile(path, selector)
+	if err != nil {
+		return nil, err
+	}
+
+	byTag := make(map[string]map[string]interface{}, len(nodes))
+	for _, node := range nodes {
+		if tag, _ := node["tag"].(string); tag != "" {
+			byTag[tag] = node
+		}
+	}
+	return byTag, nil
+}
+
+// poolOutboundsOutdated reports whether rebuilding the pool from the same servers would write different outbounds.
+func poolOutboundsOutdated(outboundsPath string, servers []models.Server, selector string) (bool, error) {
+	config, err := ReadOutboundsConfig(outboundsPath)
+	if err != nil {
+		return false, err
+	}
+	layout, err := ReadPoolLayout(outboundsPath, selector)
+	if err != nil {
+		return false, err
+	}
+	current, err := poolNodesByTag(outboundsPath, selector)
+	if err != nil {
+		return false, err
+	}
+
+	_, template := findProxyOutbound(asSlice(config["outbounds"]))
+	built, err := BuildPoolOutbounds(servers, selector, template, layout)
+	if err != nil {
+		return false, nil
+	}
+
+	for _, raw := range built {
+		node, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		tag, _ := node["tag"].(string)
+		if existing, present := current[tag]; present && !sameJSON(existing, node) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func concat(lists ...[]string) []string {

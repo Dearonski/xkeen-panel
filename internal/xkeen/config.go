@@ -118,6 +118,7 @@ type VLESSParams struct {
 	ALPN        string
 	Encryption  string
 	Extra       string // JSON from the extra parameter (xhttp: downloadSettings, xmux, …)
+	FinalMask   string // JSON from the fm parameter, rendered as streamSettings.finalmask
 }
 
 // ParseVLESS parses a VLESS URI in full.
@@ -155,6 +156,7 @@ func ParseVLESS(uri string) (*VLESSParams, error) {
 		ALPN:        q.Get("alpn"),
 		Encryption:  q.Get("encryption"),
 		Extra:       q.Get("extra"),
+		FinalMask:   q.Get("fm"),
 	}, nil
 }
 
@@ -270,6 +272,14 @@ func buildOutboundFromURI(p *VLESSParams, tag string, format outboundFormat) map
 			h2["host"] = []interface{}{p.Host}
 		}
 		streamSettings["httpSettings"] = h2
+	}
+
+	// A server that expects a mask resets every connection made without it
+	if p.FinalMask != "" {
+		var mask map[string]interface{}
+		if err := json.Unmarshal([]byte(p.FinalMask), &mask); err == nil && len(mask) > 0 {
+			streamSettings["finalmask"] = mask
+		}
 	}
 
 	outbound := map[string]interface{}{
