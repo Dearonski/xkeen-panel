@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 	"xkeen-panel/internal/models"
 )
 
@@ -59,5 +60,23 @@ func TestGetDataDeepCopy(t *testing.T) {
 
 	if got := sm.GetServers(); got[0].Country != "NL" {
 		t.Errorf("GetData returned an alias: internal Country = %q, want NL", got[0].Country)
+	}
+}
+
+func TestRefreshKeepsMeasuredLatency(t *testing.T) {
+	checked := time.Now().Add(-time.Minute).Truncate(time.Second)
+	old := []models.Server{
+		{RawURI: "vless://a", Latency: 87, LastChecked: checked, CountryOverride: "SE"},
+		{RawURI: "vless://gone", Latency: 40},
+	}
+	fresh := []models.Server{{RawURI: "vless://new"}, {RawURI: "vless://a"}}
+
+	carryOverrides(old, fresh)
+
+	if fresh[1].Latency != 87 || !fresh[1].LastChecked.Equal(checked) || fresh[1].CountryOverride != "SE" {
+		t.Errorf("server = %+v, want its ping and country carried over the refresh", fresh[1])
+	}
+	if fresh[0].Latency != 0 {
+		t.Errorf("a new server got latency %d from nowhere", fresh[0].Latency)
 	}
 }

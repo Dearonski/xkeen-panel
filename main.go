@@ -199,6 +199,8 @@ func main() {
 	go watchdog.RunExitScan(ctx)
 	go sites.RunLocks(ctx)
 
+	go runLatencyRefresh(ctx, cfg, subManager, eventBus)
+
 	// Periodic subscription refresh
 	go runSubscriptionRefresh(ctx, cfg, subManager, watchdog, detector, poolStore, geoMatcher, eventBus, refreshReset)
 
@@ -428,6 +430,43 @@ func syncPool(cfg *models.Config, sm *xkeen.SubscriptionManager, wd *monitor.Wat
 	case res.Changed:
 		det.InvalidateTopology()
 		wd.Log("[AUTO-UPDATE] Пул обновлён: +%d, -%d, заменено %d%s", len(res.Added), len(res.Removed), len(res.Replaced), liveSuffix(res))
+	}
+}
+
+const (
+	latencyFirstRun = time.Minute
+	latencyEvery    = 30 * time.Minute
+)
+
+// runLatencyRefresh keeps the server list's pings current, so the page shows them without a manual check.
+func runLatencyRefresh(ctx context.Context, cfg *models.Config, sm *xkeen.SubscriptionManager, bus *sse.EventBus) {
+	timer := time.NewTimer(latencyFirstRun)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
+		timer.Reset(latencyEvery)
+
+		servers := sm.GetServers()
+		if len(servers) == 0 {
+			continue
+		}
+		checked := xkeen.CheckAllLatencies(servers, time.Duration(cfg.ProbeTimeoutMs)*time.Millisecond, cfg.ProbeConcurrency)
+
+		// Nothing answering means the uplink is down, not that every server died
+		alive := false
+		for _, server := range checked {
+			alive = alive || server.Latency >= 0
+		}
+		if !alive {
+			continue
+		}
+
+		sm.UpdateLatencies(checked)
+		bus.Publish(sse.Event{Type: "subscription", Data: map[string]bool{"updated": true}})
 	}
 }
 

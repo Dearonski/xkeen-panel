@@ -112,7 +112,7 @@ export function ServersPage() {
         const hasActive = (g: CountryGroup) =>
             g.list.some(s => s.active) ? 0 : 1
         return [...byCountry.entries()]
-            .map(([code, list]) => ({ code, list: list.sort(byLatency) }))
+            .map(([code, list]) => ({ code, list: list.sort(byName) }))
             .sort(
                 (a, b) =>
                     hasActive(a) - hasActive(b) ||
@@ -142,7 +142,7 @@ export function ServersPage() {
                 (a, b) =>
                     Number(b.current) - Number(a.current) ||
                     Number(a.excluded) - Number(b.excluded) ||
-                    rank(a.latency) - rank(b.latency),
+                    compareNames(a.node.name, b.node.name),
             )
     }, [pool, servers, query])
 
@@ -201,7 +201,7 @@ export function ServersPage() {
                             </IconTile>
                         }
                         label={checking ? 'Проверяю пинг…' : 'Проверить пинг'}
-                        hint='До самих серверов, без VPN'
+                        hint='До самих серверов, без VPN. Панель обновляет его сама раз в полчаса'
                         onClick={check}
                         disabled={checking}
                     />
@@ -494,8 +494,9 @@ function matches(query: string, name: string, country?: string) {
     )
 }
 
-function rank(ms: number) {
-    return ms > 0 ? ms : Infinity
+// Latency never orders a list: every fresh ping would reshuffle it under the finger
+function compareNames(a: string, b: string) {
+    return a.localeCompare(b, 'ru', { numeric: true })
 }
 
 function siteLabel(domains: string[]) {
@@ -629,11 +630,9 @@ function groupTitle(g: CountryGroup) {
     return `${countryName(g.code) || 'Страна не определена'} · ${g.list.length}`
 }
 
-function byLatency(a: Server, b: Server) {
+function byName(a: Server, b: Server) {
     if (a.active !== b.active) return a.active ? -1 : 1
-    const la = a.latency_ms < 0 ? Infinity : a.latency_ms || Infinity
-    const lb = b.latency_ms < 0 ? Infinity : b.latency_ms || Infinity
-    return la - lb
+    return compareNames(a.name, b.name)
 }
 
 function statusOf(server: Server) {

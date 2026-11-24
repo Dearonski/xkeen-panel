@@ -129,20 +129,22 @@ func (sm *SubscriptionManager) applyRefreshLocked(servers []models.Server) {
 	}
 }
 
-// carryOverrides moves manual CountryOverride values onto the new list by RawURI.
+// carryOverrides moves what the panel knows about a server onto the new list by RawURI: the manual country and the last measured latency, which a refresh would otherwise blank every time.
 func carryOverrides(old, fresh []models.Server) {
 	if len(old) == 0 {
 		return
 	}
-	overrides := make(map[string]string, len(old))
-	for i := range old {
-		if old[i].CountryOverride != "" && old[i].RawURI != "" {
-			overrides[old[i].RawURI] = old[i].CountryOverride
+	known := make(map[string]models.Server, len(old))
+	for _, server := range old {
+		if server.RawURI != "" {
+			known[server.RawURI] = server
 		}
 	}
 	for i := range fresh {
-		if ov, ok := overrides[fresh[i].RawURI]; ok {
-			fresh[i].CountryOverride = ov
+		if prev, ok := known[fresh[i].RawURI]; ok {
+			fresh[i].CountryOverride = prev.CountryOverride
+			fresh[i].Latency = prev.Latency
+			fresh[i].LastChecked = prev.LastChecked
 		}
 	}
 }
