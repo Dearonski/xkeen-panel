@@ -3,6 +3,7 @@ package xkeen
 import (
 	"context"
 	"fmt"
+	"os"
 	"regexp"
 	"sort"
 	"sync"
@@ -16,6 +17,9 @@ const siteRecheckEvery = 12 * time.Hour
 
 // Keeps a check that keeps failing, say on a missing xray binary, from running every minute
 const siteRetryAfter = 10 * time.Minute
+
+// With nothing passing the site rides every node at once, which is no state to stay in for half a day
+const siteEmptyRecheckEvery = 30 * time.Minute
 
 type SiteManager struct {
 	store         *SiteStore
@@ -32,12 +36,17 @@ type SiteManager struct {
 	Exits     *ExitStore
 	// Countries a site must not see the owner in, the same list auto-pick avoids
 	AvoidCountries func() []string
+	// The node everything else leaves through; a site takes it when it opens the site, so the owner has one exit IP where possible
+	Preferred func() string
 
-	work      sync.Mutex
-	mu        sync.Mutex
-	checking  map[int]bool
-	attempted map[int]time.Time
-	verified  map[int]lockVerification
+	work        sync.Mutex
+	mu          sync.Mutex
+	checking    map[int]bool
+	attempted   map[int]time.Time
+	verified    map[int]lockVerification
+	emptyRuns   map[int]int
+	stickyFails map[int]int
+	poolSeenAt  time.Time
 }
 
 func NewSiteManager(store *SiteStore, det *Detector, sub *SubscriptionManager, outboundsPath, apiAddr string, timeout time.Duration) *SiteManager {
@@ -53,9 +62,12 @@ func NewSiteManager(store *SiteStore, det *Detector, sub *SubscriptionManager, o
 		AvoidCountries: func() []string { return nil },
 		Logf:           func(string, ...interface{}) {},
 		ProbeAddr:      func() string { return "" },
+		Preferred:      func() string { return "" },
 		checking:       map[int]bool{},
 		attempted:      map[int]time.Time{},
 		verified:       map[int]lockVerification{},
+		emptyRuns:      map[int]int{},
+		stickyFails:    map[int]int{},
 	}
 }
 
@@ -161,6 +173,8 @@ func (m *SiteManager) check(id int) {
 	m.work.Lock()
 	defer m.work.Unlock()
 
+	WaitCoreSettled()
+
 	site, ok := m.store.Get(id)
 	if !ok || m.Unavailable() != "" {
 		return
@@ -197,15 +211,32 @@ func (m *SiteManager) check(id int) {
 			return
 		}
 	}
+	nodes = m.withSticky(site, nodes)
+
+	seq := RestartSeq()
 	results, err := CheckSite(m.detector.Runtime(), nodes, site.CheckURL, country, m.timeout)
 	if err != nil {
 		m.Logf("[SITES] Проверка %s не выполнена: %v", site.Domains[0], err)
 		return
 	}
+	if IsRestarting() || RestartSeq() != seq {
+		m.Logf("[SITES] Проверка %s совпала с перезапуском ядра — результат отброшен, повторю позже", site.Domains[0])
+		return
+	}
 	markAvoidedCountries(results, m.AvoidCountries())
 
+	worked := len(site.Passing()) > 0
 	site.Results = results
 	site.CheckedAt = time.Now()
+
+	// Every node failing at once after some passed is far more often a network blip than a ban on all of them
+	if worked && len(site.Passing()) == 0 && m.emptyRuns[id] == 0 {
+		m.emptyRuns[id]++
+		m.Logf("[SITES] %s не открылся ни через одну ноду, хотя раньше открывался — похоже на сбой сети, оставляю прежние ноды и перепроверю", site.Domains[0])
+		return
+	}
+	delete(m.emptyRuns, id)
+
 	if err := m.store.Put(site); err != nil {
 		m.Logf("[SITES] Не удалось сохранить результат: %v", err)
 		return
@@ -228,6 +259,8 @@ func (m *SiteManager) check(id int) {
 }
 
 func (m *SiteManager) applyLocked() error {
+	WaitCoreSettled()
+
 	sites := m.store.List()
 	// Before the config: a lock's first restart is exactly the moment traffic would otherwise go direct
 	if err := m.syncKillSwitch(sites); err != nil {
@@ -235,16 +268,43 @@ func (m *SiteManager) applyLocked() error {
 	}
 
 	top := m.detector.Topology()
+	pool, err := poolNodesInFile(m.outboundsPath, top.Selector())
+	if err != nil {
+		return err
+	}
+
 	sourced := map[int][]map[string]interface{}{}
-	for _, site := range sites {
-		if site.Lock != nil || site.Source.IsPool() {
+	sticky := map[int]map[string]interface{}{}
+	for i, site := range sites {
+		if site.Lock != nil {
 			continue
 		}
-		nodes, err := m.siteNodes(site, nil)
-		if err != nil {
-			return err
+		nodes := pool
+		if !site.Source.IsPool() {
+			own, err := m.siteNodes(site, nil)
+			if err != nil {
+				return err
+			}
+			sourced[site.ID] = own
+			if len(own) > 0 {
+				nodes = own
+			}
 		}
-		sourced[site.ID] = nodes
+
+		key, node := m.resolveSticky(site, nodes)
+		if node != nil {
+			sticky[site.ID] = node
+		}
+		if key == site.Sticky {
+			continue
+		}
+		sites[i].Sticky = key
+		if err := m.store.Put(sites[i]); err != nil {
+			m.Logf("[SITES] Не удалось сохранить ноду %s: %v", site.Domains[0], err)
+		}
+		if key != "" {
+			m.Logf("[SITES] %s идёт через %s", site.Domains[0], m.nodeName(key))
+		}
 	}
 
 	restart, err := ApplySites(m.detector.Runtime(), SiteApply{
@@ -253,6 +313,7 @@ func (m *SiteManager) applyLocked() error {
 		PoolBalancer:  top.BalancerTag,
 		APIAddr:       m.apiAddr,
 		Sourced:       sourced,
+		Sticky:        sticky,
 	}, sites)
 	if err != nil {
 		return err
@@ -278,7 +339,7 @@ func (m *SiteManager) Run(ctx context.Context) {
 		case <-ticker.C:
 		}
 
-		if m.Unavailable() != "" {
+		if m.Unavailable() != "" || IsRestarting() {
 			continue
 		}
 
@@ -287,11 +348,17 @@ func (m *SiteManager) Run(ctx context.Context) {
 			continue
 		}
 
+		m.followPool()
+
 		for _, site := range m.store.List() {
-			if m.Checking(site.ID) || time.Since(m.attempted[site.ID]) < siteRetryAfter {
+			if m.Checking(site.ID) {
 				continue
 			}
-			if stale(site, m.siteNodeKeys(site, layout)) {
+			broken := m.stickyBroken(site)
+			if time.Since(m.attempted[site.ID]) < siteRetryAfter {
+				continue
+			}
+			if broken || stale(site, m.siteNodeKeys(site, layout)) {
 				m.attempted[site.ID] = time.Now()
 				m.setChecking(site.ID, true)
 				m.check(site.ID)
@@ -300,8 +367,26 @@ func (m *SiteManager) Run(ctx context.Context) {
 	}
 }
 
+// Site outbounds are copies of pool nodes, so a rewritten pool, or a panel that renders them differently after an update, has to reach the sites without waiting for their next check
+func (m *SiteManager) followPool() {
+	st, err := os.Stat(m.outboundsPath)
+	if err != nil || st.ModTime().Equal(m.poolSeenAt) || len(m.store.List()) == 0 {
+		return
+	}
+	m.poolSeenAt = st.ModTime()
+
+	m.work.Lock()
+	defer m.work.Unlock()
+	if err := m.applyLocked(); err != nil {
+		m.Logf("[SITES] Не удалось применить: %v", err)
+	}
+}
+
 func stale(site Site, nodes []string) bool {
 	if time.Since(site.CheckedAt) > siteRecheckEvery {
+		return true
+	}
+	if len(site.Results) > 0 && len(site.Passing()) == 0 && time.Since(site.CheckedAt) > siteEmptyRecheckEvery {
 		return true
 	}
 	checked := site.CheckedNodes()
@@ -327,6 +412,8 @@ type SiteView struct {
 	Source         *SiteSource    `json:"source,omitempty"`
 	// The source matched no server, so the site falls back to the pool
 	Fallback bool `json:"fallback"`
+	// Key of the node the site currently goes through
+	Sticky string `json:"sticky,omitempty"`
 }
 
 type SiteLockView struct {
@@ -356,6 +443,8 @@ type SiteNodeView struct {
 	ExitIP   string `json:"exit_ip,omitempty"`
 	// The country the site sees, which can differ from the node's own
 	ExitCountry string `json:"exit_country,omitempty"`
+	// Different networks see the node from different addresses
+	SplitExit bool `json:"split_exit,omitempty"`
 }
 
 type siteNodeRow struct {
@@ -393,6 +482,9 @@ func (m *SiteManager) Views() []SiteView {
 			Nodes:          []SiteNodeView{},
 			Source:         site.Source,
 		}
+		if site.Lock == nil {
+			view.Sticky = site.Sticky
+		}
 		if view.IPs == nil {
 			view.IPs = []string{}
 		}
@@ -429,10 +521,15 @@ func (m *SiteManager) Views() []SiteView {
 			}
 		}
 
+		rows = withStickyRow(rows, view.Sticky, servers)
+
 		for _, row := range rows {
 			nv := SiteNodeView{Key: row.key, Tag: row.tag, ServerID: -1, Name: row.address, State: "unknown"}
 			if s := row.server; s != nil {
 				nv.ServerID, nv.Name, nv.Country = s.ID, s.Name, ServerCountry(*s)
+			}
+			if exits, ok := m.Exits.Get(row.key); ok {
+				nv.SplitExit = exits.SplitExit()
 			}
 			if r, ok := byNode[row.key]; ok {
 				nv.State, nv.Status, nv.Error, nv.Ms = "fail", r.Status, r.Error, r.Ms
@@ -448,8 +545,14 @@ func (m *SiteManager) Views() []SiteView {
 			view.Nodes = append(view.Nodes, nv)
 		}
 
+		rank := func(n SiteNodeView) int {
+			if n.Key == view.Sticky {
+				return -1
+			}
+			return stateRank(n.State)
+		}
 		sort.SliceStable(view.Nodes, func(i, j int) bool {
-			return stateRank(view.Nodes[i].State) < stateRank(view.Nodes[j].State)
+			return rank(view.Nodes[i]) < rank(view.Nodes[j])
 		})
 		views = append(views, view)
 	}

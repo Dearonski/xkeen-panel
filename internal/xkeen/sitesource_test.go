@@ -89,7 +89,7 @@ func TestSiteOutboundsUsesSourcedNodes(t *testing.T) {
 	own := map[string]interface{}{"tag": "scan-1", "protocol": "vless", "settings": vnextSettings("own.example")}
 	sites := []Site{{ID: 1, Source: &SiteSource{Countries: []string{"DE"}}}, {ID: 2, Source: &SiteSource{Countries: []string{"JP"}}}}
 
-	out := siteOutbounds(sites, []map[string]interface{}{poolNode}, map[int][]map[string]interface{}{1: {own}})
+	out := siteOutbounds(sites, []map[string]interface{}{poolNode}, map[int][]map[string]interface{}{1: {own}}, nil)
 
 	if len(out) != 2 {
 		t.Fatalf("got %d outbounds, want one per site", len(out))

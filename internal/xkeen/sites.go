@@ -26,6 +26,8 @@ type Site struct {
 	CheckedAt      time.Time    `json:"checked_at"`
 	Lock           *SiteLock    `json:"lock,omitempty"`
 	Source         *SiteSource  `json:"source,omitempty"`
+	// The one node the site goes through: a balancer over several would move its exit IP between connections
+	Sticky string `json:"sticky,omitempty"`
 }
 
 type SiteResult struct {
@@ -76,14 +78,8 @@ const siteObservatorySelector = "site"
 
 var siteTagRe = regexp.MustCompile(`^site\d+(-(\d+|pin))?$`)
 
-var sitePinTagRe = regexp.MustCompile(`^site\d+-pin$`)
-
 func IsSiteTag(tag string) bool {
 	return siteTagRe.MatchString(tag)
-}
-
-func isSitePinTag(tag string) bool {
-	return sitePinTagRe.MatchString(tag)
 }
 
 func siteBalancerTag(id int) string { return fmt.Sprintf("site%d", id) }
@@ -300,8 +296,8 @@ func (s *SiteStore) saveLocked() error {
 	return writeFileAtomic(s.path, data, 0600)
 }
 
-// A site with no passing node gets all its nodes, and one whose source matched nothing gets the pool, so a failed check never cuts it off; a blocked lock gets nothing, and Xray drops traffic to a missing tag
-func siteOutbounds(sites []Site, pool []map[string]interface{}, sourced map[int][]map[string]interface{}) []interface{} {
+// A site goes through its sticky node alone; with no passing node it gets all its nodes, and one whose source matched nothing gets the pool, so a failed check never cuts it off; a blocked lock gets nothing, and Xray drops traffic to a missing tag
+func siteOutbounds(sites []Site, pool []map[string]interface{}, sourced map[int][]map[string]interface{}, sticky map[int]map[string]interface{}) []interface{} {
 	var outbounds []interface{}
 
 	for _, site := range sites {
@@ -328,6 +324,9 @@ func siteOutbounds(sites []Site, pool []map[string]interface{}, sourced map[int]
 		}
 		if len(chosen) == 0 {
 			chosen = nodes
+		}
+		if node := sticky[site.ID]; node != nil {
+			chosen = []map[string]interface{}{node}
 		}
 
 		for i, node := range chosen {
@@ -382,17 +381,22 @@ func siteRules(site Site, inboundTags []interface{}) []interface{} {
 	return rules
 }
 
-// Lets the monitor check a lock along the exact path client traffic takes
-func lockProbeRule(site Site) map[string]interface{} {
+// Lets the monitor check a site along the exact path client traffic takes
+func siteProbeRule(site Site) map[string]interface{} {
+	target, tag := "balancerTag", siteBalancerTag(site.ID)
+	if site.Lock != nil {
+		target, tag = "outboundTag", sitePinTag(site.ID)
+	}
+
 	domains := make([]interface{}, len(site.Domains))
 	for i, d := range site.Domains {
 		domains[i] = "domain:" + d
 	}
 	return map[string]interface{}{
-		"type":        "field",
-		"inboundTag":  []interface{}{ProbeInboundTag},
-		"domain":      domains,
-		"outboundTag": sitePinTag(site.ID),
+		"type":       "field",
+		"inboundTag": []interface{}{ProbeInboundTag},
+		"domain":     domains,
+		target:       tag,
 	}
 }
 
@@ -441,7 +445,7 @@ func applySiteRouting(doc *routingDoc, sites []Site, poolBalancer string) bool {
 
 	inboundTags := catchAllInbounds(routing, poolBalancer)
 
-	var lockProbes, probes, tail []interface{}
+	var siteProbes, probes, tail []interface{}
 	leading := true
 	for _, raw := range asSlice(routing["rules"]) {
 		rule, ok := raw.(map[string]interface{})
@@ -476,13 +480,11 @@ func applySiteRouting(doc *routingDoc, sites []Site, poolBalancer string) bool {
 
 	var own []interface{}
 	for _, site := range sites {
-		if site.Lock != nil {
-			lockProbes = append(lockProbes, lockProbeRule(site))
-		}
+		siteProbes = append(siteProbes, siteProbeRule(site))
 		own = append(own, siteRules(site, inboundTags)...)
 	}
 
-	rules := append(lockProbes, probes...)
+	rules := append(siteProbes, probes...)
 	rules = append(rules, own...)
 	routing["rules"] = append(rules, tail...)
 	doc.config["routing"] = routing
@@ -536,6 +538,7 @@ type SiteApply struct {
 	PoolBalancer  string
 	APIAddr       string
 	Sourced       map[int][]map[string]interface{}
+	Sticky        map[int]map[string]interface{}
 }
 
 // Only a change in routing needs a restart; swapping a site's nodes goes through the core API
@@ -557,7 +560,7 @@ func ApplySites(rt Runtime, opts SiteApply, sites []Site) (restart bool, err err
 	existed := ReadJSONC(sitesPath, &current) == nil
 	oldOutbounds := asSlice(current["outbounds"])
 
-	outbounds := siteOutbounds(sites, pool, opts.Sourced)
+	outbounds := siteOutbounds(sites, pool, opts.Sourced, opts.Sticky)
 	if outbounds == nil {
 		outbounds = []interface{}{}
 	}

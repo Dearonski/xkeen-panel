@@ -110,9 +110,13 @@ func TestApplySitesRoutesThroughPassingNodes(t *testing.T) {
 	doc, _ := findRoutingDoc(rt, ruleTargetsBalancer(DefaultBalancerTag))
 	rules := asSlice(doc.routing["rules"])
 
-	first := rules[0].(map[string]interface{})
+	probe := rules[0].(map[string]interface{})
+	if !isSiteProbeRule(probe) || probe["balancerTag"] != "site1" {
+		t.Fatalf("first rule = %v, want the site's probe route", rules[0])
+	}
+	first := rules[1].(map[string]interface{})
 	if first["balancerTag"] != "site1" {
-		t.Fatalf("site rule not placed first: %v", rules[0])
+		t.Fatalf("site rule not placed ahead of the owner's rules: %v", rules[1])
 	}
 	if !reflect.DeepEqual(first["inboundTag"], []interface{}{"redirect", "tproxy"}) {
 		t.Errorf("site rule inbounds = %v, want the catch-all's", first["inboundTag"])
@@ -217,6 +221,14 @@ func TestSiteStale(t *testing.T) {
 	}
 	if !stale(site, []string{a.Key(), b.Key()}) {
 		t.Error("a node the check never saw makes the site stale")
+	}
+	site.CheckedAt = time.Now().Add(-siteEmptyRecheckEvery - time.Minute)
+	if !stale(site, []string{a.Key()}) {
+		t.Error("a check nothing passed is retried long before the regular recheck")
+	}
+	site.Results[0].OK = true
+	if stale(site, []string{a.Key()}) {
+		t.Error("a site with a passing node waits for the regular recheck")
 	}
 	site.CheckedAt = time.Now().Add(-siteRecheckEvery - time.Minute)
 	if !stale(site, []string{a.Key()}) {

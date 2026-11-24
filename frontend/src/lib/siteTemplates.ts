@@ -16,7 +16,7 @@ export const siteTemplates: SiteTemplate[] = [
         tagline: 'Лента без заморозки',
         about: 'Панель откроет TikTok через каждый сервер и спросит, в какой стране он вас видит. TikTok пойдёт только через серверы, где это не страна из исключений автовыбора.',
         domains:
-            'tiktok.com tiktokv.com tiktokv.us tiktokcdn.com tiktokcdn-us.com ttwstatic.com byteoversea.com ibytedtos.com ibyteimg.com',
+            'tiktok.com tiktokv.com tiktokv.us tiktokv.eu tiktokw.us tiktokw.eu tiktokcdn.com tiktokcdn-us.com tiktokcdn-eu.com tiktokeu-cdn.com tiktokrow-cdn.com tiktok-row.net tiktokd.net tiktokd.org tiktokstaticb.com tiktokvapp.com ttwstatic.com ttlivecdn.com ttcdn-us.com ttoverseaus.net muscdn.com musical.ly tik-tokapi.com byteoversea.com byteoversea.net byteglb.com bytedapm.com ibytedtos.com ibyteimg.com',
         ips: '',
         checkURL: 'https://www.tiktok.com/explore',
         countryPattern: '"region":"([A-Z]{2})"',

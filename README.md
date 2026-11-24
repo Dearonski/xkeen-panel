@@ -24,8 +24,9 @@ Skrill0 layout (1.x, `S24xray`) — the layout, the active proxy core
   pool; Xray leaves a dead node without a restart
 - **Any server by hand** — pin any subscription server, in the pool or not; if
   it dies, the panel moves to another server of the same country
-- **Sites** — a site that fails on some servers goes only through the ones that
-  open it — see [A site that opens only through some servers](docs/guides/sentry.md);
+- **Sites** — a site that fails on some servers goes through one that opens it
+  and stays there until that server stops working, so its exit IP does not move
+  between connections — see [A site that opens only through some servers](docs/guides/sentry.md);
   a site can also be judged by the country it reports seeing you in — see
   [TikTok that keeps showing the Russian feed](docs/guides/tiktok.md)
 - **One exit IP** — lock a site to a single server; if its IP or country
@@ -141,9 +142,11 @@ and take precedence, so `config.yaml` is never rewritten.
 - **Checks have their own inbound.** The panel adds `00_panel_probe.json` (a
   socks inbound on `probe_addr`) and one rule at the top of the routing file
   sending it where client traffic goes.
-- **Sites have their own outbounds.** Each site's servers are copies in
-  `04_sites.json` (`siteN-1`, `siteN-2`… or a single `siteN-pin` when locked),
-  with rules placed above everything but the probe rule.
+- **Sites have their own outbounds.** Each site's server is a copy in
+  `04_sites.json` (`siteN-1`, or `siteN-pin` when locked; every candidate as
+  `siteN-1`, `siteN-2`… only while none passes the check), with rules placed
+  above everything but the probe rules. Each site also gets a probe rule, so
+  the panel checks its server along the path client traffic takes.
 - **A lock adds a netfilter hook.** `/opt/etc/ndm/netfilter.d/99-xkeen-panel-lock.sh`
   rejects forwarded traffic to a locked site's IP ranges. Traffic XKeen
   intercepts never reaches `FORWARD`, so it only bites when XKeen is not

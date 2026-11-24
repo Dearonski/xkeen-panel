@@ -41,6 +41,9 @@ export function siteSummary(site: Site) {
     const ago = timeAgo(site.checked_at)
     const when = ago ? ` · ${ago === 'только что' ? ago : `${ago} назад`}` : ''
     if (site.passing === 0) return `Не открывается ни через один сервер${when}`
+    const current = site.nodes.find(n => n.key === site.sticky)
+    if (current)
+        return `${current.name} · подходят ${site.passing} из ${site.nodes.length}${when}`
     return `${site.passing} из ${site.nodes.length} серверов${when}`
 }
 
@@ -448,7 +451,7 @@ export function SiteSheet({
                                   ? sourceMode(site) === 'pool'
                                       ? 'Пока ни один сервер не прошёл проверку, сайт идёт через весь пул, как раньше.'
                                       : 'Пока ни один сервер не прошёл проверку, сайт идёт через все выбранные серверы.'
-                                  : `Проверяется ${site.check_url}.${site.country_pattern ? ' Страну панель берёт из ответа сайта.' : ''} Панель перепроверяет сайт, когда меняются его серверы, и раз в 12 часов.`
+                                  : `Проверяется ${site.check_url}.${site.country_pattern ? ' Страну панель берёт из ответа сайта.' : ''} Панель перепроверяет сайт, когда меняются его серверы, и раз в 12 часов.${site.sticky ? ' Сайт ходит через один сервер и уходит с него, только когда тот перестаёт работать.' : ''}`
                         }
                     >
                         <Row
@@ -475,6 +478,7 @@ export function SiteSheet({
                                 <NodeResult
                                     key={n.key}
                                     node={n}
+                                    current={site.sticky === n.key}
                                     lockedAs={
                                         site.lock?.node === n.key
                                             ? site.lock
@@ -842,12 +846,14 @@ function LockIcon({ blocked }: { blocked: boolean }) {
 
 function NodeResult({
     node,
+    current,
     lockedAs,
     pending,
     busy,
     onPick,
 }: {
     node: SiteNode
+    current: boolean
     lockedAs?: SiteLock
     pending: boolean
     busy: boolean
@@ -891,7 +897,12 @@ function NodeResult({
             onClick={onPick}
             disabled={busy && !pending}
             hint={
-                [countryName(node.country), exitLabel(node)]
+                [
+                    current && 'сайт идёт через него',
+                    countryName(node.country),
+                    exitLabel(node),
+                    node.split_exit && 'два выходных адреса',
+                ]
                     .filter(Boolean)
                     .join(' · ') || undefined
             }

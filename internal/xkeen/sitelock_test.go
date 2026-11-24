@@ -59,7 +59,7 @@ func TestApplySitesLockUsesOnePinOutbound(t *testing.T) {
 
 	rules := asSlice(doc.routing["rules"])
 	first := rules[0].(map[string]interface{})
-	if !isLockProbeRule(first) || first["outboundTag"] != "site1-pin" {
+	if !isSiteProbeRule(first) || first["outboundTag"] != "site1-pin" {
 		t.Fatalf("first rule = %v, want the lock probe", first)
 	}
 
@@ -137,11 +137,11 @@ func TestSetProbeRuleKeepsLockProbesFirst(t *testing.T) {
 		t.Fatal("the probe rule fought the lock probe for first place")
 	}
 	rules := asSlice(doc.routing["rules"])
-	if !isLockProbeRule(rules[0].(map[string]interface{})) {
+	if !isSiteProbeRule(rules[0].(map[string]interface{})) {
 		t.Errorf("rules[0] = %v, want the lock probe", rules[0])
 	}
 	second := rules[1].(map[string]interface{})
-	if !isProbeRule(second) || isLockProbeRule(second) || second["balancerTag"] != DefaultBalancerTag {
+	if !isProbeRule(second) || isSiteProbeRule(second) || second["balancerTag"] != DefaultBalancerTag {
 		t.Errorf("rules[1] = %v, want the probe rule", second)
 	}
 }

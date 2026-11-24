@@ -72,6 +72,7 @@ export type SiteNode = {
     ms?: number
     exit_ip?: string
     exit_country?: string
+    split_exit?: boolean
 }
 
 export type SiteLock = {
@@ -100,6 +101,7 @@ export type Site = {
     nodes: SiteNode[]
     source?: SiteSource
     fallback: boolean
+    sticky?: string
 }
 
 export type SiteSource = {

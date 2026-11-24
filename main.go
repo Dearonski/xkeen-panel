@@ -124,6 +124,7 @@ func main() {
 	sites.ProbeAddr = watchdog.ProbeAddr
 	sites.Exits = exitStore
 	sites.AvoidCountries = cfg.AvoidCountries
+	sites.Preferred = func() string { return poolStore.Get().PinnedNode }
 
 	// Package xkeen logs to stdout by default, which the init script discards —
 	// send its pool and restart events to the panel log instead

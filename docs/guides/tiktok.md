@@ -23,12 +23,15 @@ fields below fill themselves; or enter them by hand:
 
 | Field | Value |
 | --- | --- |
-| Домены (Domains) | `tiktok.com tiktokv.com tiktokv.us tiktokcdn.com tiktokcdn-us.com ttwstatic.com byteoversea.com ibytedtos.com ibyteimg.com` |
+| Домены (Domains) | `tiktok.com tiktokv.com tiktokv.us tiktokv.eu tiktokw.us tiktokw.eu tiktokcdn.com tiktokcdn-us.com tiktokcdn-eu.com tiktokeu-cdn.com tiktokrow-cdn.com tiktok-row.net tiktokd.net tiktokd.org tiktokstaticb.com tiktokvapp.com ttwstatic.com ttlivecdn.com ttcdn-us.com ttoverseaus.net muscdn.com musical.ly tik-tokapi.com byteoversea.com byteoversea.net byteglb.com bytedapm.com ibytedtos.com ibyteimg.com` |
 | IP-адреса (IP addresses) | leave empty |
 | Адрес проверки (Check address) | `https://www.tiktok.com/explore` |
 | Страна со слов сайта (Country the site reports, under **Дополнительно**) | `"region":"([A-Z]{2})"` |
 
-- The domains cover the web, the app API and the video CDN.
+- The domains cover the web, the app API and the video CDN, including the
+  European cluster (`tiktokv.eu`, `tiktokw.eu`, `tiktokcdn-eu.com`) TikTok moves
+  you to when it sees a European address. A domain left out goes through the
+  server everything else uses, and TikTok then sees you from two places.
 - Leave the IP addresses empty: the CDNs are shared with unrelated sites.
 - The pattern picks the two-letter region out of the page; the lowercase
   `"region":"eu-ttp2"` next to it does not match.
@@ -45,6 +48,10 @@ sees …).
 - A server whose page carries no region fails too, so a captcha or an error
   page never passes as clean.
 - If no server passes, TikTok keeps the whole pool rather than being cut off.
+- Of the servers that pass, the site takes one and stays on it. A server whose
+  exit scan shows one address for every network is taken first: through a
+  server with a second exit the Akamai part of TikTok and the Google Cloud part
+  see two different addresses.
 - With the source **Страны** (Countries), servers are picked by their scanned
   exit, and one through which TikTok sees another country still fails.
 
