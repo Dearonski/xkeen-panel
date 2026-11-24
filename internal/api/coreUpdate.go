@@ -34,11 +34,3 @@ func (h *CoreUpdateHandler) HandleApply(w http.ResponseWriter, r *http.Request) 
 	}
 	writeJSON(w, http.StatusAccepted, h.updater.State())
 }
-
-func (h *CoreUpdateHandler) HandleRollback(w http.ResponseWriter, r *http.Request) {
-	if err := h.updater.Rollback(); err != nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusAccepted, h.updater.State())
-}

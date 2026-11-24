@@ -28,8 +28,6 @@ type Settings struct {
 
 	// Rolled back from or failed to start: automatic updates leave it alone, the button still installs it
 	Skip string `json:"skip,omitempty"`
-
-	Previous string `json:"previous,omitempty"`
 }
 
 type State struct {
@@ -41,7 +39,6 @@ type State struct {
 	Auto        bool      `json:"auto"`
 	AutoHour    int       `json:"auto_hour"`
 	Skip        string    `json:"skip,omitempty"`
-	Previous    string    `json:"previous,omitempty"`
 	Updating    bool      `json:"updating"`
 	LastCheck   time.Time `json:"last_check,omitempty"`
 	CheckError  string    `json:"check_error,omitempty"`
@@ -176,12 +173,6 @@ func (u *Updater) stateLocked() State {
 		FailedStart: u.failedStart,
 	}
 
-	if u.settings.Previous != "" {
-		if _, err := os.Stat(u.prevPath()); err == nil {
-			state.Previous = u.settings.Previous
-		}
-	}
-
 	if u.latest != nil {
 		cur, okCur := parseSemver(u.current)
 		next, okNext := parseSemver(u.latest.Tag)
@@ -260,14 +251,6 @@ func (u *Updater) runApply(release Release) {
 		return
 	}
 
-	u.mu.Lock()
-	u.settings.Previous = u.current
-	err := writeJSON(u.settingsPath(), u.settings)
-	u.mu.Unlock()
-	if err != nil {
-		u.log("[UPDATE] Не удалось сохранить настройки: %v", err)
-	}
-
 	u.log("[UPDATE] %s установлена, перезапускаю панель", release.Tag)
 	if err := u.restart(); err != nil {
 		u.fail(fmt.Errorf("новая версия установлена, но панель не перезапустилась: %w — перезапустите её вручную", err))
@@ -281,41 +264,6 @@ func (u *Updater) fail(err error) {
 	u.applyErr = err.Error()
 	u.mu.Unlock()
 	u.notify()
-}
-
-func (u *Updater) Rollback() error {
-	u.mu.Lock()
-	if u.updating {
-		u.mu.Unlock()
-		return fmt.Errorf("обновление уже выполняется")
-	}
-	previous := u.stateLocked().Previous
-	if previous == "" {
-		u.mu.Unlock()
-		return fmt.Errorf("предыдущей версии нет на диске")
-	}
-	if err := u.rollbackBinary(); err != nil {
-		u.mu.Unlock()
-		return err
-	}
-	u.settings.Skip = u.current
-	u.settings.Previous = ""
-	u.updating = true
-	if err := writeJSON(u.settingsPath(), u.settings); err != nil {
-		u.log("[UPDATE] Не удалось сохранить настройки: %v", err)
-	}
-	u.mu.Unlock()
-
-	u.log("[UPDATE] Откат на %s, %s больше не ставится автоматически", previous, u.current)
-	u.notify()
-
-	go func() {
-		if err := u.restart(); err != nil {
-			u.fail(fmt.Errorf("предыдущая версия возвращена на диск, но панель не перезапустилась: %w", err))
-		}
-	}()
-
-	return nil
 }
 
 // Checks keep running either way, so the UI can still offer an update by hand.
@@ -338,7 +286,6 @@ func (u *Updater) Startup(ctx context.Context, healthy func() bool) {
 		u.mu.Lock()
 		u.failedStart = failed.To
 		u.settings.Skip = failed.To
-		u.settings.Previous = ""
 		if err := writeJSON(u.settingsPath(), u.settings); err != nil {
 			u.log("[UPDATE] Не удалось сохранить настройки: %v", err)
 		}

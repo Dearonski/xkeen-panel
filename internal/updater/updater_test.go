@@ -226,13 +226,10 @@ func TestApplyInstallsAndRestarts(t *testing.T) {
 		t.Errorf("binary = %q, want the release", got)
 	}
 	if prev, _ := os.ReadFile(h.bin + ".prev"); string(prev) != "old binary" {
-		t.Errorf(".prev = %q, want the old binary kept for rollback", prev)
+		t.Errorf(".prev = %q, want the old binary kept for the start guard", prev)
 	}
 	if _, err := os.Stat(h.u.pendingPath()); err != nil {
 		t.Error("no pending marker — the guard could not tell a failed start")
-	}
-	if got := h.u.State().Previous; got != "v1.3.0" {
-		t.Errorf("previous = %q, want v1.3.0 offered for rollback", got)
 	}
 }
 
@@ -353,38 +350,6 @@ func TestStartupDoesNotConfirmUnhealthyPanel(t *testing.T) {
 
 	if _, err := os.Stat(h.u.pendingPath()); err != nil {
 		t.Error("an unresponsive panel confirmed its own update")
-	}
-}
-
-func TestRollbackRestoresPreviousAndSkipsCurrent(t *testing.T) {
-	h := newHarness(t, "v1.3.1", fakeRelease{tag: "v1.3.1"})
-	if err := os.WriteFile(h.bin+".prev", []byte("v1.3.0 binary"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	h.u.settings.Previous = "v1.3.0"
-
-	if got := h.u.State().Previous; got != "v1.3.0" {
-		t.Fatalf("previous = %q, want v1.3.0", got)
-	}
-	if err := h.u.Rollback(); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, "restart", func() bool { return h.restarts.Load() == 1 })
-
-	if got := h.binContent(t); got != "v1.3.0 binary" {
-		t.Errorf("binary = %q, want the previous version", got)
-	}
-	if h.u.State().Skip != "v1.3.1" {
-		t.Error("automatic updates would reinstall the version rolled back from")
-	}
-}
-
-func TestRollbackWithoutPrevious(t *testing.T) {
-	h := newHarness(t, "v1.3.1", fakeRelease{tag: "v1.3.1"})
-	h.u.settings.Previous = "v1.3.0" // recorded, but the file is gone
-
-	if err := h.u.Rollback(); err == nil {
-		t.Error("rollback succeeded with no previous binary on disk")
 	}
 }
 

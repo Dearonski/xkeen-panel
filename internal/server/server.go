@@ -11,6 +11,7 @@ import (
 	"xkeen-panel/internal/auth"
 	"xkeen-panel/internal/coreupdate"
 	"xkeen-panel/internal/geoip"
+	"xkeen-panel/internal/infraupdate"
 	"xkeen-panel/internal/keenetic"
 	"xkeen-panel/internal/models"
 	"xkeen-panel/internal/monitor"
@@ -34,11 +35,12 @@ type Server struct {
 	eventBus     *sse.EventBus
 	updater      *updater.Updater
 	coreUpdater  *coreupdate.Updater
+	infraUpdater *infraupdate.Updater
 	settings     *api.PanelSettingsHandler
 	frontendFS   fs.FS
 }
 
-func New(cfg *models.Config, um *auth.UserManager, sub *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, pool *xkeen.PoolStore, sites *xkeen.SiteManager, matcher *geoip.Matcher, bus *sse.EventBus, upd *updater.Updater, core *coreupdate.Updater, settings *api.PanelSettingsHandler, frontendFS fs.FS) *Server {
+func New(cfg *models.Config, um *auth.UserManager, sub *xkeen.SubscriptionManager, wd *monitor.Watchdog, det *xkeen.Detector, pool *xkeen.PoolStore, sites *xkeen.SiteManager, matcher *geoip.Matcher, bus *sse.EventBus, upd *updater.Updater, core *coreupdate.Updater, infra *infraupdate.Updater, settings *api.PanelSettingsHandler, frontendFS fs.FS) *Server {
 	return &Server{
 		config:       cfg,
 		userManager:  um,
@@ -51,6 +53,7 @@ func New(cfg *models.Config, um *auth.UserManager, sub *xkeen.SubscriptionManage
 		eventBus:     bus,
 		updater:      upd,
 		coreUpdater:  core,
+		infraUpdater: infra,
 		settings:     settings,
 		frontendFS:   frontendFS,
 	}
@@ -71,6 +74,7 @@ func (s *Server) Handler() http.Handler {
 	webAuthnHandler := api.NewWebAuthnHandler(s.userManager, rateLimiter, s.config)
 	updateHandler := api.NewUpdateHandler(s.updater)
 	coreUpdateHandler := api.NewCoreUpdateHandler(s.coreUpdater)
+	infraUpdateHandler := api.NewInfraUpdateHandler(s.infraUpdater)
 	devicesHandler := api.NewDevicesHandler(s.detector, keenetic.DefaultAddr)
 	setupHandler := api.NewSetupHandler(s.detector, s.subscription, s.watchdog, devicesHandler)
 	sitesHandler := api.NewSitesHandler(s.sites)
@@ -161,12 +165,13 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/update", updateHandler.HandleStatus)
 			r.Post("/update/check", updateHandler.HandleCheck)
 			r.Post("/update/apply", updateHandler.HandleApply)
-			r.Post("/update/rollback", updateHandler.HandleRollback)
 			r.Put("/update/settings", updateHandler.HandleSettings)
 			r.Get("/core/update", coreUpdateHandler.HandleStatus)
 			r.Post("/core/update/check", coreUpdateHandler.HandleCheck)
 			r.Post("/core/update/apply", coreUpdateHandler.HandleApply)
-			r.Post("/core/update/rollback", coreUpdateHandler.HandleRollback)
+			r.Get("/infra/update", infraUpdateHandler.HandleStatus)
+			r.Post("/infra/update/check", infraUpdateHandler.HandleCheck)
+			r.Post("/infra/update/{item}/apply", infraUpdateHandler.HandleApply)
 
 			r.Get("/logs", handlers.HandleLogs)
 

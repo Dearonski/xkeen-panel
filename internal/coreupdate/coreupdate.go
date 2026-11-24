@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"runtime"
 	"sync"
 	"time"
@@ -29,7 +28,6 @@ type State struct {
 	Available  bool      `json:"available"`
 	Supported  bool      `json:"supported"`
 	Reason     string    `json:"reason,omitempty"`
-	Previous   string    `json:"previous,omitempty"`
 	Updating   bool      `json:"updating"`
 	Step       string    `json:"step,omitempty"`
 	LastCheck  time.Time `json:"last_check,omitempty"`
@@ -52,10 +50,6 @@ type Options struct {
 	Publish func(State)
 }
 
-type settings struct {
-	Previous string `json:"previous,omitempty"`
-}
-
 type Updater struct {
 	runtime func() xkeen.Runtime
 	dataDir string
@@ -73,7 +67,6 @@ type Updater struct {
 	startTimeout time.Duration
 
 	mu        sync.Mutex
-	settings  settings
 	current   string
 	latest    *Release
 	lastCheck time.Time
@@ -117,13 +110,8 @@ func New(opts Options) *Updater {
 	if u.busy == nil {
 		u.busy = func() bool { return false }
 	}
-	if err := readJSON(u.settingsPath(), &u.settings); err != nil && !os.IsNotExist(err) {
-		u.log("[XRAY] Состояние обновлений ядра не прочитано: %v", err)
-	}
 	return u
 }
-
-func (u *Updater) settingsPath() string { return filepath.Join(u.dataDir, "xray-update.json") }
 
 func (u *Updater) log(format string, args ...interface{}) {
 	if u.logf != nil {
@@ -167,7 +155,6 @@ func (u *Updater) stateLocked() State {
 		Latest:     u.latest,
 		Supported:  reason == "",
 		Reason:     reason,
-		Previous:   u.settings.Previous,
 		Updating:   u.updating,
 		Step:       u.step,
 		LastCheck:  u.lastCheck,
@@ -273,56 +260,6 @@ func (u *Updater) runApply(release Release) {
 func (u *Updater) setStep(step string) {
 	u.mu.Lock()
 	u.step = step
-	u.mu.Unlock()
-	u.notify()
-}
-
-func (u *Updater) Rollback() error {
-	rt, reason := u.supported()
-	if reason != "" {
-		return fmt.Errorf("%s", reason)
-	}
-	if _, err := os.Stat(prevPath(rt.CoreBin)); err != nil {
-		return fmt.Errorf("прежней версии нет на диске")
-	}
-
-	u.mu.Lock()
-	if u.updating {
-		u.mu.Unlock()
-		return fmt.Errorf("обновление ядра уже идёт")
-	}
-	u.updating, u.applyErr, u.step = true, "", "Возвращаю прежнюю версию"
-	u.mu.Unlock()
-	u.notify()
-
-	go u.rollback(rt.CoreBin)
-	return nil
-}
-
-func (u *Updater) rollback(bin string) {
-	u.mu.Lock()
-	previous := u.settings.Previous
-	u.mu.Unlock()
-
-	err := u.restorePrevious(bin)
-	if err == nil {
-		u.restart()
-		u.log("[XRAY] Ядро возвращено на %s", previous)
-		u.mu.Lock()
-		u.settings.Previous = ""
-		saveErr := writeJSON(u.settingsPath(), u.settings)
-		u.mu.Unlock()
-		if saveErr != nil {
-			u.log("[XRAY] Не удалось сохранить состояние обновлений ядра: %v", saveErr)
-		}
-	}
-	u.refreshCurrent()
-
-	u.mu.Lock()
-	u.updating, u.step = false, ""
-	if err != nil {
-		u.applyErr = err.Error()
-	}
 	u.mu.Unlock()
 	u.notify()
 }

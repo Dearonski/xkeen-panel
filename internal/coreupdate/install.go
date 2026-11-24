@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -84,13 +83,6 @@ func (u *Updater) install(ctx context.Context, release Release) error {
 		return fmt.Errorf("Xray %s не запустился (%v) — ядро возвращено на %s", release.Tag, err, from)
 	}
 
-	u.mu.Lock()
-	u.settings.Previous = from
-	saveErr := writeJSON(u.settingsPath(), u.settings)
-	u.mu.Unlock()
-	if saveErr != nil {
-		u.log("[XRAY] Не удалось сохранить состояние обновлений ядра: %v", saveErr)
-	}
 	u.log("[XRAY] Ядро обновлено: %s → %s", from, release.Tag)
 	return nil
 }
@@ -276,27 +268,4 @@ func routerModel() string {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	return string(bytes.TrimSpace(body))
-}
-
-func writeJSON(path string, v interface{}) error {
-	data, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
-
-func readJSON(path string, v interface{}) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(data, v)
 }

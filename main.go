@@ -17,6 +17,7 @@ import (
 	"xkeen-panel/internal/auth"
 	"xkeen-panel/internal/coreupdate"
 	"xkeen-panel/internal/geoip"
+	"xkeen-panel/internal/infraupdate"
 	"xkeen-panel/internal/localtz"
 	"xkeen-panel/internal/models"
 	"xkeen-panel/internal/monitor"
@@ -237,6 +238,22 @@ func main() {
 	})
 	go coreUpd.Run(ctx)
 
+	geoDir := filepath.Dir(cfg.GeoIPPath)
+	if geoPath != "" {
+		geoDir = filepath.Dir(geoPath)
+	}
+	infraUpd := infraupdate.New(infraupdate.Options{
+		Runtime: detector.Runtime,
+		Refresh: detector.InvalidateRuntime,
+		GeoDir:  geoDir,
+		Settled: watchdog.CoreReturned,
+		Log:     watchdog.Log,
+		Publish: func(state infraupdate.State) {
+			eventBus.Publish(sse.Event{Type: "infra-update", Data: state})
+		},
+	})
+	go infraUpd.Run(ctx)
+
 	// Frontend assets
 	var frontendFS fs.FS
 	distFS, err := fs.Sub(frontendDist, "frontend/dist")
@@ -247,7 +264,7 @@ func main() {
 	}
 
 	// HTTP server
-	srv := server.New(cfg, userManager, subManager, watchdog, detector, poolStore, sites, geoMatcher, eventBus, upd, coreUpd, panelSettings, frontendFS)
+	srv := server.New(cfg, userManager, subManager, watchdog, detector, poolStore, sites, geoMatcher, eventBus, upd, coreUpd, infraUpd, panelSettings, frontendFS)
 	httpServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Port),
 		Handler: srv.Handler(),

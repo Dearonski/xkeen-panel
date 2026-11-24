@@ -155,8 +155,8 @@ func TestInstallSwapsBinaryAndKeepsPrevious(t *testing.T) {
 	if _, err := os.Stat(prevPath(f.bin)); err != nil {
 		t.Fatal("previous binary not kept")
 	}
-	if f.restarts.Load() != 1 || f.u.settings.Previous != "25.1.30" {
-		t.Fatalf("restarts %d, previous %q", f.restarts.Load(), f.u.settings.Previous)
+	if f.restarts.Load() != 1 {
+		t.Fatalf("restarts %d, want one", f.restarts.Load())
 	}
 }
 
@@ -206,25 +206,6 @@ func TestInstallRollsBackWhenCoreDoesNotStart(t *testing.T) {
 	}
 	if f.version(t) != "25.1.30" || f.restarts.Load() != 2 {
 		t.Fatalf("version %s, restarts %d", f.version(t), f.restarts.Load())
-	}
-}
-
-func TestRollbackRestoresPrevious(t *testing.T) {
-	f := newFixture(t, goodArchive(t), "", true)
-	if err := f.apply(t); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := f.u.Rollback(); err != nil {
-		t.Fatal(err)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for f.u.State().Updating && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	s := f.u.State()
-	if s.Current != "25.1.30" || s.Previous != "" || f.restarts.Load() != 2 {
-		t.Fatalf("got %+v, restarts %d", s, f.restarts.Load())
 	}
 }
 

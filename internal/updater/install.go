@@ -139,17 +139,6 @@ func (u *Updater) startGuard() error {
 	return cmd.Run()
 }
 
-func (u *Updater) rollbackBinary() error {
-	if _, err := os.Stat(u.prevPath()); err != nil {
-		return fmt.Errorf("предыдущей версии нет на диске")
-	}
-	if err := os.Rename(u.prevPath(), u.binPath); err != nil {
-		return fmt.Errorf("откат не выполнен: %w", err)
-	}
-	os.Remove(u.pendingPath())
-	return nil
-}
-
 func writeJSON(path string, v interface{}) error {
 	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {

@@ -2,10 +2,10 @@ import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { IconLoader2 } from '@tabler/icons-react'
 import { Group, PageTitle, Row, Switch } from '@/components/ios'
-import { useCoreUpdate, useUpdate } from '@/hooks/usePanelData'
+import { useCoreUpdate, useInfraUpdate, useUpdate } from '@/hooks/usePanelData'
 import { api } from '@/lib/api'
 import { isSet } from '@/lib/format'
-import type { CoreUpdateState, UpdateState } from '@/types'
+import type { CoreUpdateState, InfraUpdateState, UpdateState } from '@/types'
 
 const back = { to: '/settings', label: 'Настройки' }
 
@@ -29,7 +29,6 @@ const checkedAt = (iso?: string) =>
 export function UpdatePage() {
     const qc = useQueryClient()
     const u = useUpdate().data
-    const [confirmRollback, setConfirmRollback] = useState(false)
     const [showNotes, setShowNotes] = useState(false)
 
     const store = (state: UpdateState) => qc.setQueryData(['update'], state)
@@ -39,10 +38,6 @@ export function UpdatePage() {
     })
     const apply = useMutation({
         mutationFn: () => api.post<UpdateState>('/api/update/apply'),
-        onSuccess: store,
-    })
-    const rollback = useMutation({
-        mutationFn: () => api.post<UpdateState>('/api/update/rollback'),
         onSuccess: store,
     })
     const setAuto = useMutation({
@@ -58,25 +53,13 @@ export function UpdatePage() {
 
     if (!u) return <PageTitle title='Обновления' back={back} />
 
-    const busy =
-        u.updating || check.isPending || apply.isPending || rollback.isPending
+    const busy = u.updating || check.isPending || apply.isPending
     const error =
-        (check.error ?? apply.error ?? rollback.error ?? setAuto.error)
-            ?.message ??
+        (check.error ?? apply.error ?? setAuto.error)?.message ??
         u.apply_error ??
         u.check_error
     const hour = String(u.auto_hour).padStart(2, '0')
     const lastCheck = checkedAt(u.last_check)
-
-    const onRollback = () => {
-        if (!confirmRollback) {
-            setConfirmRollback(true)
-            setTimeout(() => setConfirmRollback(false), 5000)
-            return
-        }
-        rollback.mutate()
-        setConfirmRollback(false)
-    }
 
     if (!u.supported) {
         return (
@@ -90,7 +73,9 @@ export function UpdatePage() {
                             detail={u.current}
                         />
                     </Group>
+                    <XKeenGroup />
                     <CoreGroup />
+                    <GeoGroup />
                 </div>
             </>
         )
@@ -145,7 +130,7 @@ export function UpdatePage() {
                                     u.skip === u.latest.tag
                                         ? u.failed_start === u.latest.tag
                                             ? 'Не запустилась и была откачена — ставится только вручную'
-                                            : 'С неё был откат — ставится только вручную'
+                                            : 'Ставится только вручную'
                                         : undefined
                                 }
                             />
@@ -194,21 +179,11 @@ export function UpdatePage() {
                         onClick={() => check.mutate()}
                         disabled={busy}
                     />
-                    {u.previous && (
-                        <Row
-                            label={
-                                confirmRollback
-                                    ? 'Точно откатить?'
-                                    : `Откатить на ${u.previous}`
-                            }
-                            tone='destructive'
-                            onClick={onRollback}
-                            disabled={busy}
-                        />
-                    )}
                 </Group>
 
+                <XKeenGroup />
                 <CoreGroup />
+                <GeoGroup />
             </div>
         </>
     )
@@ -217,7 +192,6 @@ export function UpdatePage() {
 function CoreGroup() {
     const qc = useQueryClient()
     const c = useCoreUpdate().data
-    const [confirmRollback, setConfirmRollback] = useState(false)
     const [showNotes, setShowNotes] = useState(false)
 
     const store = (state: CoreUpdateState) =>
@@ -228,11 +202,6 @@ function CoreGroup() {
     })
     const apply = useMutation({
         mutationFn: () => api.post<CoreUpdateState>('/api/core/update/apply'),
-        onSuccess: store,
-    })
-    const rollback = useMutation({
-        mutationFn: () =>
-            api.post<CoreUpdateState>('/api/core/update/rollback'),
         onSuccess: store,
     })
 
@@ -246,23 +215,10 @@ function CoreGroup() {
         )
     }
 
-    const busy =
-        c.updating || check.isPending || apply.isPending || rollback.isPending
+    const busy = c.updating || check.isPending || apply.isPending
     const error =
-        (check.error ?? apply.error ?? rollback.error)?.message ??
-        c.apply_error ??
-        c.check_error
+        (check.error ?? apply.error)?.message ?? c.apply_error ?? c.check_error
     const lastCheck = checkedAt(c.last_check)
-
-    const onRollback = () => {
-        if (!confirmRollback) {
-            setConfirmRollback(true)
-            setTimeout(() => setConfirmRollback(false), 5000)
-            return
-        }
-        rollback.mutate()
-        setConfirmRollback(false)
-    }
 
     return (
         <Group
@@ -328,18 +284,175 @@ function CoreGroup() {
                 onClick={() => check.mutate()}
                 disabled={busy}
             />
-            {c.previous && (
+        </Group>
+    )
+}
+
+function useInfraActions() {
+    const qc = useQueryClient()
+    const store = (state: InfraUpdateState) =>
+        qc.setQueryData(['infra-update'], state)
+    const check = useMutation({
+        mutationFn: () => api.post<InfraUpdateState>('/api/infra/update/check'),
+        onSuccess: store,
+    })
+    const apply = useMutation({
+        mutationFn: (item: 'xkeen' | 'geo') =>
+            api.post<InfraUpdateState>(`/api/infra/update/${item}/apply`),
+        onSuccess: store,
+    })
+    return { check, apply }
+}
+
+function XKeenGroup() {
+    const infra = useInfraUpdate().data
+    const { check, apply } = useInfraActions()
+    const [showNotes, setShowNotes] = useState(false)
+
+    if (!infra) return null
+    const x = infra.xkeen
+
+    if (!x.supported) {
+        return (
+            <Group title='XKeen'>
                 <Row
-                    label={
-                        confirmRollback
-                            ? 'Точно вернуть?'
-                            : `Вернуть Xray ${withV(c.previous)}`
+                    label='Обновление недоступно'
+                    hint={x.reason}
+                    detail={x.current || undefined}
+                />
+            </Group>
+        )
+    }
+
+    const busy =
+        x.updating || infra.geo.updating || check.isPending || apply.isPending
+    const error =
+        (check.error ?? apply.error)?.message ?? x.apply_error ?? x.check_error
+    const lastCheck = checkedAt(x.last_check)
+
+    return (
+        <Group
+            title='XKeen'
+            footer={
+                error && !x.updating ? (
+                    <span className='text-destructive'>{error}</span>
+                ) : (
+                    'Панель запускает xkeen -uk: XKeen скачивает новую версию, заново регистрирует себя и перезапускает прокси.'
+                )
+            }
+        >
+            {x.updating ? (
+                <Row
+                    icon={
+                        <IconLoader2 className='size-5 animate-spin text-warning' />
                     }
-                    tone='destructive'
-                    onClick={onRollback}
-                    disabled={busy}
+                    label='Обновляю XKeen'
+                    hint='Прокси перезапустится, это займёт несколько минут'
+                />
+            ) : x.available && x.latest ? (
+                <>
+                    <Row
+                        label={`Доступна ${x.latest.tag}`}
+                        hint={`Установлена ${x.current}`}
+                    />
+                    {x.latest.notes && (
+                        <Row
+                            label={
+                                showNotes ? 'Скрыть изменения' : 'Что нового'
+                            }
+                            tone='tint'
+                            onClick={() => setShowNotes(v => !v)}
+                        />
+                    )}
+                    {showNotes && x.latest.notes && (
+                        <pre className='max-h-72 overflow-auto whitespace-pre-wrap py-3 font-sans text-[13px] leading-snug text-muted-foreground'>
+                            {plainNotes(x.latest.notes)}
+                        </pre>
+                    )}
+                    <Row
+                        label={`Обновить XKeen до ${x.latest.tag}`}
+                        tone='tint'
+                        onClick={() => apply.mutate('xkeen')}
+                        disabled={busy}
+                    />
+                </>
+            ) : (
+                <Row
+                    label={`XKeen ${x.current}`}
+                    hint={
+                        x.latest
+                            ? `Последняя версия${lastCheck ? ` · проверено ${lastCheck}` : ''}`
+                            : lastCheck
+                              ? `Проверено ${lastCheck}`
+                              : undefined
+                    }
                 />
             )}
+            <Row
+                label={check.isPending ? 'Проверяю…' : 'Проверить сейчас'}
+                tone='tint'
+                onClick={() => check.mutate()}
+                disabled={busy}
+            />
+        </Group>
+    )
+}
+
+function GeoGroup() {
+    const infra = useInfraUpdate().data
+    const { apply } = useInfraActions()
+
+    if (!infra) return null
+    const g = infra.geo
+
+    if (!g.supported) {
+        return (
+            <Group title='Геобазы'>
+                <Row label='Обновление недоступно' hint={g.reason} />
+            </Group>
+        )
+    }
+
+    const busy = g.updating || infra.xkeen.updating || apply.isPending
+    const error = apply.error?.message ?? g.apply_error
+    const updated = checkedAt(g.updated_at)
+
+    return (
+        <Group
+            title='Геобазы'
+            footer={
+                error && !g.updating ? (
+                    <span className='text-destructive'>{error}</span>
+                ) : (
+                    `${g.schedule ? `XKeen обновляет базы сам ${g.schedule}.` : 'Автообновление баз в XKeen не настроено.'} После обновления прокси перезапускается.`
+                )
+            }
+        >
+            {g.updating ? (
+                <Row
+                    icon={
+                        <IconLoader2 className='size-5 animate-spin text-warning' />
+                    }
+                    label='Обновляю геобазы'
+                    hint='Прокси прервётся на несколько секунд'
+                />
+            ) : (
+                <Row
+                    label='Базы GeoIP и GeoSite'
+                    hint={[
+                        updated && `Обновлены ${updated}`,
+                        `файлов: ${g.files}`,
+                    ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                />
+            )}
+            <Row
+                label='Обновить сейчас'
+                tone='tint'
+                onClick={() => apply.mutate('geo')}
+                disabled={busy}
+            />
         </Group>
     )
 }

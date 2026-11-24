@@ -37,14 +37,6 @@ func (h *UpdateHandler) HandleApply(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, h.updater.State())
 }
 
-func (h *UpdateHandler) HandleRollback(w http.ResponseWriter, r *http.Request) {
-	if err := h.updater.Rollback(); err != nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
-		return
-	}
-	writeJSON(w, http.StatusAccepted, h.updater.State())
-}
-
 func (h *UpdateHandler) HandleSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Auto *bool `json:"auto"`

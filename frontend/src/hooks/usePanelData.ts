@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import type {
     CoreUpdateState,
+    InfraUpdateState,
     DevicesResponse,
     PoolStatus,
     Server,
@@ -87,5 +88,12 @@ export function useCoreUpdate() {
     return useQuery({
         queryKey: ['core-update'],
         queryFn: () => api.get<CoreUpdateState>('/api/core/update'),
+    })
+}
+
+export function useInfraUpdate() {
+    return useQuery({
+        queryKey: ['infra-update'],
+        queryFn: () => api.get<InfraUpdateState>('/api/infra/update'),
     })
 }

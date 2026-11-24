@@ -192,7 +192,6 @@ export type UpdateState = {
     auto: boolean
     auto_hour: number
     skip?: string
-    previous?: string
     updating: boolean
     last_check?: string
     check_error?: string
@@ -230,10 +229,37 @@ export type CoreUpdateState = {
     available: boolean
     supported: boolean
     reason?: string
-    previous?: string
     updating: boolean
     step?: string
     last_check?: string
     check_error?: string
     apply_error?: string
+}
+
+export type InfraUpdateState = {
+    xkeen: {
+        current: string
+        latest?: {
+            tag: string
+            notes: string
+            url: string
+            published_at: string
+        }
+        available: boolean
+        supported: boolean
+        reason?: string
+        updating: boolean
+        last_check?: string
+        check_error?: string
+        apply_error?: string
+    }
+    geo: {
+        files: number
+        updated_at?: string
+        schedule?: string
+        supported: boolean
+        reason?: string
+        updating: boolean
+        apply_error?: string
+    }
 }

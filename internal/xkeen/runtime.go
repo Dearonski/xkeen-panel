@@ -129,6 +129,13 @@ func (d *Detector) Topology() Topology {
 	return d.topo
 }
 
+// InvalidateRuntime drops the cached snapshot after XKeen itself was replaced.
+func (d *Detector) InvalidateRuntime() {
+	d.mu.Lock()
+	d.cachedAt = time.Time{}
+	d.mu.Unlock()
+}
+
 // InvalidateTopology drops the cache after the panel rewrites the config.
 func (d *Detector) InvalidateTopology() {
 	d.topoMu.Lock()
